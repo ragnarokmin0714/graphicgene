@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/*
+ * Design-tool density, set on day one.
+ *
+ * shadcn's defaults target dashboards: 40px controls, generous padding,
+ * large radii. A vector editor needs Figma-scale chrome — 24-28px rows, tight
+ * type, small radii — and retrofitting that after twenty panels exist means
+ * editing twenty files. These tokens are the place to tune it; component
+ * source under components/ui is vendored and may be edited to match.
+ */
+@theme {
+  --radius-gg: 4px;
+
+  --spacing-row: 1.75rem; /* 28px — standard list/panel row */
+  --spacing-panel: 15rem; /* 240px — side panel width */
+
+  --text-ui: 0.75rem; /* 12px — panel and menu body */
+  --text-ui--line-height: 1rem;
+  --text-label: 0.6875rem; /* 11px — section headings */
+  --text-label--line-height: 0.875rem;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --radius: var(--radius-gg);
+
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.21 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0 0);
+  --primary: oklch(0.55 0.18 264);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.955 0 0);
+  --secondary-foreground: oklch(0.21 0 0);
+  --muted: oklch(0.955 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+  --accent: oklch(0.94 0 0);
+  --accent-foreground: oklch(0.21 0 0);
+  --destructive: oklch(0.58 0.22 27);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.9 0 0);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0.55 0.18 264);
+
+  /* The canvas surround is deliberately not --background: artwork must be
+     judged against a neutral field, not against the UI's own tint. */
+  --canvas-backdrop: oklch(0.93 0 0);
+}
+
+.dark {
+  --background: oklch(0.205 0 0);
+  --foreground: oklch(0.95 0 0);
+  --card: oklch(0.24 0 0);
+  --card-foreground: oklch(0.95 0 0);
+  --popover: oklch(0.24 0 0);
+  --popover-foreground: oklch(0.95 0 0);
+  --primary: oklch(0.65 0.17 264);
+  --primary-foreground: oklch(0.18 0 0);
+  --secondary: oklch(0.27 0 0);
+  --secondary-foreground: oklch(0.95 0 0);
+  --muted: oklch(0.27 0 0);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.3 0 0);
+  --accent-foreground: oklch(0.95 0 0);
+  --destructive: oklch(0.62 0.2 27);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.31 0 0);
+  --input: oklch(0.31 0 0);
+  --ring: oklch(0.65 0.17 264);
+
+  --canvas-backdrop: oklch(0.16 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-canvas-backdrop: var(--canvas-backdrop);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground text-ui antialiased;
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* A design tool's chrome should never be selected by a stray drag. */
+    user-select: none;
+  }
+}

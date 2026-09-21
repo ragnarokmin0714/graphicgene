@@ -1,0 +1,15 @@
+[package]
+name = "graphicgene-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Document model, commands, geometry and layout for graphicgene"
+
+# Core is deliberately dependency-light and performs no IO.
+# Nothing here may reference browser or OS APIs.
+[dependencies]
+kurbo.workspace = true
+slotmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

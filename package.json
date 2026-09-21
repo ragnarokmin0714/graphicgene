@@ -1,0 +1,18 @@
+{
+  "name": "graphicgene",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "build:wasm": "wasm-pack build crates/graphicgene-wasm --release --target web --out-dir ../../apps/web/src/wasm",
+    "dev": "pnpm build:wasm && pnpm --filter @graphicgene/web dev",
+    "build": "pnpm build:wasm && pnpm --filter @graphicgene/web build",
+    "test": "cargo test --workspace",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings",
+    "smoke": "pnpm build:wasm && pnpm --filter @graphicgene/web smoke"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

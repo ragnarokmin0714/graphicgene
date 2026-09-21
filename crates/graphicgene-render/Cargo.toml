@@ -1,0 +1,12 @@
+[package]
+name = "graphicgene-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RenderScene, Renderer trait and the CPU renderer for graphicgene"
+
+[dependencies]
+graphicgene-core.workspace = true
+kurbo.workspace = true
+tiny-skia = "0.12"
+thiserror.workspace = true

@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/graphicgene-core",
+    "crates/graphicgene-render",
+    "crates/graphicgene-wasm",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+graphicgene-core = { path = "crates/graphicgene-core" }
+graphicgene-render = { path = "crates/graphicgene-render" }
+kurbo = { version = "0.13", features = ["serde"] }
+slotmap = { version = "1.0", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# Release profile for the WASM build.
+# NOTE: opt-level is "s", not "z" — "z" frequently costs real runtime in
+# geometry-heavy code. Re-measure before changing it.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
