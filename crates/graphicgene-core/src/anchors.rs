@@ -208,8 +208,11 @@ impl AnchorPath {
                 continue;
             };
             path.move_to(first.point);
-            for i in 0..sub.segment_count() {
+            let count = sub.segment_count();
+            for i in 0..count {
                 match sub.segment(i) {
+                    // ClosePath draws a straight closing segment by itself.
+                    PathSeg::Line(_) if sub.closed && i + 1 == count => {}
                     PathSeg::Line(line) => path.line_to(line.p1),
                     PathSeg::Cubic(c) => path.curve_to(c.p1, c.p2, c.p3),
                     PathSeg::Quad(q) => path.quad_to(q.p1, q.p2),

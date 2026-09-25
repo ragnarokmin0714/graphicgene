@@ -167,3 +167,30 @@ fn purge_only_removes_unreachable_nodes() {
     assert!(!doc.contains(id), "detached node should be collected");
     assert!(doc.contains(doc.root()));
 }
+
+#[test]
+fn geometry_survives_save_and_load_bit_for_bit() {
+    // Autosave writes and reads the project over and over; if parsing is
+    // off by even one ulp, geometry drifts a little on every visit. This is
+    // a real value that came back one ulp off before serde_json's
+    // `float_roundtrip` feature was enabled.
+    let mut doc = Document::new();
+    let mut journal = Journal::new();
+    let id = insert(&mut doc, &mut journal, rect_node("Drift"));
+    let transform = Affine::new([
+        1.0812309664456263,
+        0.6272476362642245,
+        -0.7526971635170695,
+        1.2974771597347514,
+        181.65838123843517,
+        -115.07110121305769,
+    ]);
+    doc.get_mut(id).unwrap().common.transform = transform;
+
+    let text = Project::new(doc).to_json().unwrap();
+    let back = Project::from_json(&text).unwrap().document;
+    let got = back.get(id).unwrap().common.transform.as_coeffs();
+    for (a, b) in got.iter().zip(transform.as_coeffs()) {
+        assert_eq!(a.to_bits(), b.to_bits(), "{a} != {b}");
+    }
+}

@@ -194,9 +194,29 @@ impl Editor {
 
     /// Serialize the project. Core does no IO — the caller decides where these
     /// bytes go (IndexedDB on web, `std::fs` on desktop).
+    ///
+    /// The copy that is written drops detached nodes. The live document keeps
+    /// them, since undo depends on them, but the file has no undo history, so
+    /// saving them would only make every autosave larger than the last.
     #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> Result<String, JsError> {
-        Project::new(self.document.clone()).to_json().map_err(to_js)
+        let mut document = self.document.clone();
+        document.purge_unreachable();
+        Project::new(document).to_json().map_err(to_js)
+    }
+
+    /// The document as SVG, `width` × `height` in size.
+    #[wasm_bindgen(js_name = exportSvg)]
+    pub fn export_svg(&self, width: f64, height: f64) -> Result<String, JsError> {
+        graphicgene_core::svg::to_svg(&self.document, width, height).map_err(to_js)
+    }
+
+    /// Whether a press is in progress, so the document holds a preview that
+    /// should not be saved yet: a drag, a pen path, or a path-edit drag.
+    pub fn busy(&self) -> bool {
+        self.gesture.is_some()
+            || self.pen.is_some()
+            || self.path_edit.as_ref().is_some_and(PathEdit::is_dragging)
     }
 
     #[wasm_bindgen(js_name = loadJson)]

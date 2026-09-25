@@ -1,16 +1,20 @@
-import { FolderOpen, Save } from "lucide-react";
+import { FileDown, FolderOpen, ImageDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { KbdGroup } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { IconButton } from "@/IconButton";
 import { Logo } from "@/Logo";
-import { MOD } from "@/shortcuts";
+import { MOD, SHIFT } from "@/shortcuts";
 import { ThemeMenu } from "@/ThemeMenu";
 
 type Props = {
-  onSave: () => void;
-  onLoad: () => void;
+  onOpen: () => void;
+  onDownload: () => void;
+  onExport: () => void;
 };
 
-export function Header({ onSave, onLoad }: Props) {
+export function Header({ onOpen, onDownload, onExport }: Props) {
   return (
     <header className="bg-card h-bar flex shrink-0 items-center gap-1 border-b px-3">
       <Logo className="size-5" />
@@ -20,8 +24,27 @@ export function Header({ onSave, onLoad }: Props) {
       </span>
 
       <div className="ml-auto flex items-center gap-0.5">
-        <IconButton label="Save" icon={<Save />} onClick={onSave} shortcut={[MOD, "S"]} />
-        <IconButton label="Load saved project" icon={<FolderOpen />} onClick={onLoad} />
+        <IconButton
+          label="Open project file"
+          icon={<FolderOpen />}
+          onClick={onOpen}
+          shortcut={[MOD, "O"]}
+        />
+        <IconButton label="Download project file" icon={<FileDown />} onClick={onDownload} />
+        <Separator orientation="vertical" className="mx-1.5 !h-4" />
+        {/* The one primary action in the chrome: getting the artwork out. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="default" onClick={onExport}>
+              <ImageDown />
+              Export SVG
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            Download the artwork as SVG
+            <KbdGroup keys={[MOD, SHIFT, "E"]} />
+          </TooltipContent>
+        </Tooltip>
         <Separator orientation="vertical" className="mx-1.5 !h-4" />
         <ThemeMenu />
       </div>

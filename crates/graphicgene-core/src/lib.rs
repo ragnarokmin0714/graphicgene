@@ -22,6 +22,7 @@ pub mod path_edit;
 pub mod pen;
 pub mod project;
 pub mod selection;
+pub mod svg;
 
 pub use color::LinearRgba;
 pub use command::{Command, Journal};

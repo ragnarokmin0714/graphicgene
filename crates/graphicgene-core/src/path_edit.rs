@@ -93,6 +93,11 @@ impl PathEdit {
         &self.selected
     }
 
+    /// Whether a press is in progress, i.e. the document holds a preview.
+    pub fn is_dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
     pub fn press(
         &mut self,
         doc: &mut Document,

@@ -151,4 +151,19 @@ assert.equal(JSON.parse(pen.overlay()).path.anchors.length, 3, "Delete removes t
 assert.equal(pen.finishMode(), true);
 assert.equal(JSON.parse(pen.overlay()).mode, null);
 
+// Export and save: SVG text for the artwork, and a project file without the
+// detached nodes that undo keeps alive.
+const svg = pen.exportSvg(W, H);
+assert.match(svg, /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg" width="64" height="64"/);
+assert.match(svg, /<path data-name="Path" d="M10,10 L50,10 L50,50 Z" fill="none" stroke="#ff0000" stroke-width="2"\/>/);
+assert.equal(pen.busy(), false);
+const bloated = new Editor(W, H);
+for (let i = 0; i < 5; i++) {
+  bloated.addRect(0, 0, 10, 10, RED);
+  bloated.undo();
+}
+// slotmap keeps vacated slots (as null) so ids keep their versions; count the live ones.
+const saved = JSON.parse(bloated.toJson()).document.nodes.filter((slot) => slot.value !== null);
+assert.equal(saved.length, 1, "undone inserts are not saved, only the root");
+
 console.log("smoke: ok");

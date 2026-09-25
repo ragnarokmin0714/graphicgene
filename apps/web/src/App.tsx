@@ -1,17 +1,24 @@
-import { useState } from "react";
+import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { EditorMode, Rgba } from "@/editor";
+import { download } from "@/files";
 import { Header } from "@/Header";
 import { LayerPanel } from "@/LayerPanel";
 import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
 import { StatusBar } from "@/StatusBar";
+import { readProject, writeProject } from "@/storage";
 import { type Tool, ToolDock } from "@/ToolDock";
 import { useEditor } from "@/useEditor";
 
 const WIDTH = 800;
 const HEIGHT = 600;
-const PROJECT_KEY = "graphicgene:project";
+const PROJECT_FILE = "graphicgene-project.json";
+const SVG_FILE = "graphicgene.svg";
+/** Quiet time after the last edit before autosaving, in ms. */
+const AUTOSAVE_DELAY = 800;
 /** Arrow-key nudge, and with Shift held, in document units. */
 const NUDGE = 1;
 const NUDGE_LARGE = 10;
@@ -53,11 +60,23 @@ function hintFor(tool: Tool, mode: EditorMode | null): string | null {
  *
  * What React does keep is view state: the active tool, and `notice`, a
  * status-bar message about the last save or load.
+ *
+ * Persistence is app-layer IO: the core hands over JSON, and this component
+ * autosaves it to IndexedDB after each pause in editing, restores it on the
+ * next visit, and moves project and SVG files in and out of the browser.
  */
 export function App() {
-  const { editor, revision, error, run } = useEditor(WIDTH, HEIGHT);
+  const { editor, revision, error, clearError, run, ready } = useEditor(WIDTH, HEIGHT);
   const [tool, setTool] = useState<Tool>("select");
   const [notice, setNotice] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  /**
+   * Autosave stays off until the stored project has been read back — or
+   * for good, if it could not be loaded, so an empty document never
+   * overwrites a project this build failed to open.
+   */
+  const restored = useRef(false);
+  const lastSaved = useRef<string | null>(null);
 
   const core = editor.current;
   const layerCount = core ? core.layers().length : 0;
@@ -68,23 +87,82 @@ export function App() {
   const undo = () => run((editor) => editor.undo());
   const redo = () => run((editor) => editor.redo());
 
-  // Core hands back bytes; where they live is the app layer's problem.
-  const save = () =>
-    run((editor) => {
-      localStorage.setItem(PROJECT_KEY, editor.toJson());
+  /** Write the project to IndexedDB unless unchanged; `force` reports even then. */
+  const save = async (force = false) => {
+    const core = editor.current;
+    if (!core || !restored.current || core.busy) return;
+    const json = core.toJson();
+    if (json === lastSaved.current && !force) return;
+    try {
+      await writeProject(json);
+      lastSaved.current = json;
       setNotice(`Saved ${timeFormat.format(new Date())}`);
-    });
+    } catch {
+      setNotice("Could not save in this browser");
+    }
+  };
 
-  const load = () =>
-    run((editor) => {
-      const text = localStorage.getItem(PROJECT_KEY);
-      if (!text) {
-        setNotice("Nothing saved yet");
-        return;
-      }
+  // Restore the last session once the core is up.
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    readProject()
+      .then((text) => {
+        if (cancelled) return;
+        if (text) {
+          const loaded = run((editor) => {
+            editor.loadJson(text);
+            return true;
+          });
+          if (!loaded) {
+            setNotice("Autosave paused: the saved project could not be opened");
+            return;
+          }
+          lastSaved.current = text;
+          setNotice("Restored your last session");
+        }
+        restored.current = true;
+      })
+      .catch(() => {
+        if (!cancelled) setNotice("Autosave is unavailable in this browser");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, run]);
+
+  // Autosave after each pause in editing. A press in progress is skipped;
+  // its release bumps the revision and schedules another try.
+  useEffect(() => {
+    if (!ready) return;
+    const timer = setTimeout(() => void save(), AUTOSAVE_DELAY);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revision, ready]);
+
+  // Leaving the tab is the last reliable moment to write.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") void save();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  });
+
+  const openFile = async (file: File) => {
+    const text = await file.text();
+    const opened = run((editor) => {
       editor.loadJson(text);
-      setNotice("Loaded saved project");
+      return true;
     });
+    if (opened) setNotice(`Opened ${file.name}`);
+  };
+
+  const downloadProject = () =>
+    run((editor) => download(PROJECT_FILE, editor.toJson(), "application/json"));
+
+  const exportSvg = () =>
+    run((editor) => download(SVG_FILE, editor.exportSvg(WIDTH, HEIGHT), "image/svg+xml"));
 
   /** Switching tools finishes a pen path or path edit in progress. */
   const changeTool = (next: Tool) => {
@@ -143,22 +221,43 @@ export function App() {
     { key: "z", mod: true, run: undo },
     { key: "z", mod: true, shift: true, run: redo },
     { key: "y", mod: true, run: redo },
-    { key: "s", mod: true, run: save },
+    { key: "s", mod: true, run: () => void save(true) },
+    { key: "o", mod: true, run: () => fileInput.current?.click() },
+    { key: "e", mod: true, shift: true, run: exportSvg },
     ...arrows,
   ]);
 
   return (
     <TooltipProvider delayDuration={400}>
       <div className="flex h-full flex-col">
-        <Header onSave={save} onLoad={load} />
+        <Header
+          onOpen={() => fileInput.current?.click()}
+          onDownload={downloadProject}
+          onExport={exportSvg}
+        />
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            // Reset so choosing the same file again still fires.
+            event.target.value = "";
+            if (file) void openFile(file);
+          }}
+        />
 
         {error && (
-          <p
-            className="bg-destructive/10 text-destructive border-destructive/20 border-b px-3 py-1.5"
+          <div
+            className="bg-destructive/10 text-destructive border-destructive/20 flex items-center gap-2 border-b py-1 pr-1 pl-3"
             role="alert"
           >
-            {error}
-          </p>
+            <p className="min-w-0 flex-1 truncate">{error}</p>
+            <Button size="icon-xs" onClick={clearError} aria-label="Dismiss">
+              <X />
+            </Button>
+          </div>
         )}
 
         <main className="flex min-h-0 flex-1">

@@ -43,5 +43,7 @@ export function useEditor(width: number, height: number) {
     }
   }, []);
 
-  return { editor: handle, revision, error, run, ready: handle.current !== null };
+  const clearError = useCallback(() => setError(null), []);
+
+  return { editor: handle, revision, error, clearError, run, ready: handle.current !== null };
 }

@@ -17,7 +17,9 @@ graphicgene-render = { path = "crates/graphicgene-render" }
 kurbo = { version = "0.13", features = ["serde"] }
 slotmap = { version = "1.0", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# float_roundtrip: exact f64 parsing. The default parser can be one ulp off,
+# and autosave re-reads the project on every visit, so geometry would drift.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 
 # Release profile for the WASM build.

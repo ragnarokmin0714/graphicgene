@@ -10,13 +10,18 @@ Drawing, selection and transforms work: rectangles and ellipses are dragged
 out on the artboard, and nodes can be selected (click, Shift-click, marquee,
 layer panel), moved, scaled and rotated with handles, nudged and deleted — each
 one undo step. The pen tool draws bezier paths, and any path (rectangles and
-ellipses included) can be edited point by point. SVG export and IndexedDB
-autosave are what remain before v0.1 is done.
+ellipses included) can be edited point by point. The project autosaves to
+IndexedDB and is restored on the next visit; project files can be downloaded
+and opened, and the artwork exports as SVG.
 
-**Verified:** 53 Rust tests, `clippy --all-targets -D warnings` clean, the web
+Every v0.1 feature is in. What stands between that and "done" is Roger's
+browser pass over everything since 2026-09-25 (below) and the Pages deploy.
+
+**Verified:** 59 Rust tests, `clippy --all-targets -D warnings` clean, the web
 build, and `apps/web/scripts/smoke.mjs` — which drives the real wasm module
 through draw / transform / undo / redo / save / reload and asserts on rendered
-pixels, including draw / select / drag / delete and pen / path-edit passes. These four are the
+pixels, including draw / select / drag / delete, pen / path-edit and export
+passes. These four are the
 bar for any change.
 
 **Browser-checked 2026-09-25** by Roger on the deployed Pages build: shapes
@@ -25,10 +30,11 @@ restores the document, edges are crisp, and the console is clean apart from a
 missing favicon (since fixed). This box has no browser engine, so anything
 changed after that date is verified headlessly only until he looks again — in
 particular the theme switch, the redesigned chrome, and all canvas
-interaction (tools, handles, marquee, pen, path editing, shortcuts). The React side of that
-interaction was exercised once in jsdom against the real wasm core — a
-one-off scratch harness, not part of the repo — which is the closest this box
-gets to a browser.
+interaction (tools, handles, marquee, pen, path editing, shortcuts), and
+autosave / restore / file open / downloads. The React side of all that was
+exercised in jsdom against the real wasm core, with fake-indexeddb standing
+in for IndexedDB — a scratch harness, not part of the repo — which is the
+closest this box gets to a browser.
 
 ## Commands
 
@@ -220,6 +226,17 @@ DOM-rendering Rust framework such as Dioxus, not an immediate-mode toolkit.
 Versioned JSON, backward compatible from v0.1 onward. The `version` field is read
 before anything else, and unknown fields round-trip rather than being dropped.
 
+- serde_json's `float_roundtrip` feature is load-bearing: without it, parsing
+  can be one ulp off, and since autosave re-reads the project on every visit,
+  geometry would drift. `geometry_survives_save_and_load_bit_for_bit` guards
+  it.
+- The written copy drops detached nodes (`purge_unreachable` on a clone); the
+  live document keeps them because undo needs them.
+- On the web the project lives in IndexedDB (`storage.ts`). Autosave stays off
+  until the stored project has been read back, and for the whole session if
+  it could not be loaded, so an empty document never overwrites a project this
+  build failed to open.
+
 ## Repo layout
 
 Three crates. New crates appear when compile time or dependency isolation
@@ -230,7 +247,7 @@ graphicgene/
 ├── Cargo.toml              # Cargo workspace
 ├── pnpm-workspace.yaml     # pnpm workspace (pnpm only)
 ├── crates/
-│   ├── graphicgene-core/   # nodes, commands, selection, hit-testing, gestures, pen, layout, project file
+│   ├── graphicgene-core/   # nodes, commands, selection, gestures, pen, SVG export, project file
 │   ├── graphicgene-render/ # RenderScene, Renderer trait, CPU renderer
 │   └── graphicgene-wasm/   # wasm-bindgen bindings (the batching boundary)
 └── apps/
@@ -266,8 +283,8 @@ Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 720 KB | 271 KB |
-| js (React + Radix + app) | 387 KB | 125 KB |
+| wasm (wasm-opt applied) | 751 KB | 291 KB |
+| js (React + Radix + app) | 390 KB | 126 KB |
 | css (incl. tw-animate-css) | 39 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |
 

@@ -293,4 +293,14 @@ export class EditorHandle {
   loadJson(text: string): void {
     this.inner.loadJson(text);
   }
+
+  /** The artwork as SVG text; the caller decides where it goes. */
+  exportSvg(width: number, height: number): string {
+    return this.inner.exportSvg(width, height);
+  }
+
+  /** A press is in progress and the document holds a preview: do not save now. */
+  get busy(): boolean {
+    return this.inner.busy();
+  }
 }
