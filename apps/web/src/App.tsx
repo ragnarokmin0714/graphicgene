@@ -1,17 +1,20 @@
 import { useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Canvas } from "@/Canvas";
 import type { Rgba } from "@/editor";
 import { Header } from "@/Header";
 import { LayerPanel } from "@/LayerPanel";
-import { useShortcuts } from "@/shortcuts";
+import { type Shortcut, useShortcuts } from "@/shortcuts";
+import { Stage } from "@/Stage";
 import { StatusBar } from "@/StatusBar";
-import { ToolDock } from "@/ToolDock";
+import { type Tool, ToolDock } from "@/ToolDock";
 import { useEditor } from "@/useEditor";
 
 const WIDTH = 800;
 const HEIGHT = 600;
 const PROJECT_KEY = "graphicgene:project";
+/** Arrow-key nudge, and with Shift held, in document units. */
+const NUDGE = 1;
+const NUDGE_LARGE = 10;
 
 /** Fills for new shapes, cycled so a fresh canvas is not a wall of one colour. */
 const SWATCHES: readonly Rgba[] = [
@@ -26,35 +29,21 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute:
 
 /**
  * v0.1 shell. Every handler sends a command into the core and re-reads what
- * came back; nothing here mirrors document state.
+ * came back; nothing here mirrors document state. Selection lives in the core
+ * as well, because it drives transforms.
  *
- * `selected` is the exception that proves the rule — it is view state (which
- * row is highlighted), not document state, so it lives in React. When
- * selection starts driving transforms it moves into the core. `notice` is the
- * same kind of state: a status-bar message about the last save or load.
+ * What React does keep is view state: the active tool, and `notice`, a
+ * status-bar message about the last save or load.
  */
 export function App() {
   const { editor, revision, error, run } = useEditor(WIDTH, HEIGHT);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [tool, setTool] = useState<Tool>("select");
   const [notice, setNotice] = useState<string | null>(null);
 
   const core = editor.current;
   const layerCount = core ? core.layers().length : 0;
-  const swatch = () => SWATCHES[layerCount % SWATCHES.length];
-
-  const addRect = () =>
-    run((editor) =>
-      setSelected(
-        editor.addRect(80 + Math.random() * 480, 60 + Math.random() * 360, 160, 120, swatch()),
-      ),
-    );
-
-  const addEllipse = () =>
-    run((editor) =>
-      setSelected(
-        editor.addEllipse(160 + Math.random() * 480, 140 + Math.random() * 320, 80, 80, swatch()),
-      ),
-    );
+  const selectionCount = core?.selectionCount ?? 0;
+  const nextFill = () => SWATCHES[layerCount % SWATCHES.length];
 
   const undo = () => run((editor) => editor.undo());
   const redo = () => run((editor) => editor.redo());
@@ -74,17 +63,43 @@ export function App() {
         return;
       }
       editor.loadJson(text);
-      setSelected(null);
       setNotice("Loaded saved project");
     });
 
+  /** Escape backs out one level: the drag, then the shape tool, then the selection. */
+  const escape = () =>
+    run((editor) => {
+      if (editor.cancelGesture()) return;
+      if (tool !== "select") setTool("select");
+      else editor.clearSelection();
+    });
+
+  const nudge = (dx: number, dy: number) => run((editor) => editor.nudge(dx, dy));
+  const arrows: Shortcut[] = (
+    [
+      ["arrowleft", -1, 0],
+      ["arrowright", 1, 0],
+      ["arrowup", 0, -1],
+      ["arrowdown", 0, 1],
+    ] as const
+  ).flatMap(([key, x, y]) => [
+    { key, repeat: true, run: () => nudge(x * NUDGE, y * NUDGE) },
+    { key, shift: true, repeat: true, run: () => nudge(x * NUDGE_LARGE, y * NUDGE_LARGE) },
+  ]);
+
   useShortcuts([
-    { key: "r", run: addRect },
-    { key: "o", run: addEllipse },
+    { key: "v", run: () => setTool("select") },
+    { key: "r", run: () => setTool("rect") },
+    { key: "o", run: () => setTool("ellipse") },
+    { key: "escape", run: escape },
+    { key: "delete", run: () => run((editor) => editor.deleteSelection()) },
+    { key: "backspace", run: () => run((editor) => editor.deleteSelection()) },
+    { key: "a", mod: true, run: () => run((editor) => editor.selectAll()) },
     { key: "z", mod: true, run: undo },
     { key: "z", mod: true, shift: true, run: redo },
     { key: "y", mod: true, run: redo },
     { key: "s", mod: true, run: save },
+    ...arrows,
   ]);
 
   return (
@@ -103,10 +118,19 @@ export function App() {
 
         <main className="flex min-h-0 flex-1">
           <section className="bg-canvas-backdrop bg-dot-grid relative min-w-0 flex-1">
-            <Canvas editor={editor} revision={revision} width={WIDTH} height={HEIGHT} />
+            <Stage
+              editor={editor}
+              revision={revision}
+              run={run}
+              width={WIDTH}
+              height={HEIGHT}
+              tool={tool}
+              nextFill={nextFill}
+              onShapeDrawn={() => setTool("select")}
+            />
             <ToolDock
-              onAddRect={addRect}
-              onAddEllipse={addEllipse}
+              tool={tool}
+              onToolChange={setTool}
               onUndo={undo}
               onRedo={redo}
               canUndo={core?.canUndo ?? false}
@@ -116,12 +140,17 @@ export function App() {
           <LayerPanel
             editor={editor}
             revision={revision}
-            selected={selected}
-            onSelect={setSelected}
+            onSelect={(id, additive) => run((editor) => editor.selectLayer(id, additive))}
           />
         </main>
 
-        <StatusBar width={WIDTH} height={HEIGHT} layerCount={layerCount} notice={notice} />
+        <StatusBar
+          width={WIDTH}
+          height={HEIGHT}
+          layerCount={layerCount}
+          selectionCount={selectionCount}
+          notice={notice}
+        />
       </div>
     </TooltipProvider>
   );

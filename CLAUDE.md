@@ -6,22 +6,28 @@ rewriting the core.
 
 ## Status
 
-Skeleton in place: the three crates compile, the document/command/render
-pipeline runs end to end, and the web shell draws rectangles and ellipses with
-working undo/redo and save/load. The pen tool, selection and SVG export are
-what remain before v0.1 is done.
+Drawing, selection and transforms work: rectangles and ellipses are dragged
+out on the artboard, and nodes can be selected (click, Shift-click, marquee,
+layer panel), moved, scaled and rotated with handles, nudged and deleted — each
+one undo step. The pen tool and SVG export (plus IndexedDB autosave) are what
+remain before v0.1 is done.
 
-**Verified:** 15 Rust tests, `clippy --all-targets -D warnings` clean, the web
+**Verified:** 33 Rust tests, `clippy --all-targets -D warnings` clean, the web
 build, and `apps/web/scripts/smoke.mjs` — which drives the real wasm module
 through draw / transform / undo / redo / save / reload and asserts on rendered
-pixels. These four are the bar for any change.
+pixels, including a draw / select / drag / delete pass. These four are the
+bar for any change.
 
 **Browser-checked 2026-09-25** by Roger on the deployed Pages build: shapes
 appear, undo/redo and their disabled states are right, save -> reload -> load
 restores the document, edges are crisp, and the console is clean apart from a
 missing favicon (since fixed). This box has no browser engine, so anything
 changed after that date is verified headlessly only until he looks again — in
-particular the theme switch and the redesigned chrome.
+particular the theme switch, the redesigned chrome, and all canvas
+interaction (tools, handles, marquee, shortcuts). The React side of that
+interaction was exercised once in jsdom against the real wasm core — a
+one-off scratch harness, not part of the repo — which is the closest this box
+gets to a browser.
 
 ## Commands
 
@@ -157,7 +163,14 @@ Theme is a per-viewer preference, not document state: `useTheme.ts` keeps it
 in React and localStorage, and an inline script in `index.html` applies it
 before first paint. Keep the two in sync. Keyboard shortcuts go through
 `useShortcuts` in `shortcuts.ts`, which already skips text fields — do not add
-ad-hoc `keydown` listeners.
+ad-hoc `keydown` listeners. The one exception is `Stage.tsx` tracking Shift
+and Alt during a drag, which re-applies a constraint rather than running a
+command.
+
+Selection handles are the one place geometry is split: the core reports the
+selection frame's corners (`overlay()`), and `handles.ts` places handles and
+hit-tests them, because handle size and grab distance are screen
+measurements that must not scale with zoom.
 
 `--canvas-backdrop` is deliberately not `--background`: artwork has to be judged
 against a neutral field, not against the UI's tint.
@@ -186,6 +199,11 @@ DOM-rendering Rust framework such as Dioxus, not an immediate-mode toolkit.
 - Every document change is a `Command` with `apply` / `undo`, appended to a
   journal.
 - Commands are serializable, which is what keeps a networked design possible.
+- Drags (move, scale, rotate, drawing a shape) preview by writing straight
+  into the document and commit as one `Command::Batch` on release, so a drag
+  is one undo step and Escape restores the press-time state. See
+  `gesture.rs`. Selection is session state in core (`selection.rs`): not
+  saved, not undoable, but shared with the future desktop app.
 - Undo/redo and replay are what the journal actually buys. **It does not decide
   collaboration**: multiplayer needs a conflict model (tree CRDT for node moves,
   or a server-authoritative sequencer), deferred until there is a reason to pick
@@ -206,7 +224,7 @@ graphicgene/
 ├── Cargo.toml              # Cargo workspace
 ├── pnpm-workspace.yaml     # pnpm workspace (pnpm only)
 ├── crates/
-│   ├── graphicgene-core/   # nodes, commands, geometry, layout pass, project file
+│   ├── graphicgene-core/   # nodes, commands, selection, hit-testing, gestures, layout, project file
 │   ├── graphicgene-render/ # RenderScene, Renderer trait, CPU renderer
 │   └── graphicgene-wasm/   # wasm-bindgen bindings (the batching boundary)
 └── apps/
@@ -242,9 +260,9 @@ Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 623 KB | 232 KB |
-| js (React + Radix + app) | 372 KB | 120 KB |
-| css (incl. tw-animate-css) | 38 KB | 7 KB |
+| wasm (wasm-opt applied) | 675 KB | 251 KB |
+| js (React + Radix + app) | 381 KB | 123 KB |
+| css (incl. tw-animate-css) | 39 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |
 
 The browser fetches only the Inter subsets whose unicode-range the page uses,

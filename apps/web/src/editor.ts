@@ -21,9 +21,37 @@ export type LayerRow = {
   visible: boolean;
   locked: boolean;
   opacity: number;
+  selected: boolean;
 };
 
 export type Rgba = [number, number, number, number];
+
+/** A document-space point. At 100% zoom, also a canvas pixel. */
+export type Point = readonly [number, number];
+
+/** The selection frame: corners go top-left, top-right, bottom-right, bottom-left, in frame terms. */
+export type Frame = {
+  corners: readonly [Point, Point, Point, Point];
+  width: number;
+  height: number;
+};
+
+/** What the selection overlay draws, all in document space. */
+export type Overlay = {
+  frame: Frame | null;
+  /** SVG path data for each selected node. */
+  outlines: string[];
+  /** SVG path data for the node under the pointer, unless it is selected. */
+  hover: string | null;
+  /** x0, y0, x1, y1 */
+  marquee: readonly [number, number, number, number] | null;
+  gesture: "move" | "scale" | "rotate" | "create" | "marquee" | null;
+};
+
+export type ShapeKind = "rect" | "ellipse";
+
+/** What a select-tool press should turn into; see `selectAt` in the wasm crate. */
+export type PressOutcome = "drag" | "hit" | "miss";
 
 let ready: Promise<void> | null = null;
 
@@ -76,6 +104,86 @@ export class EditorHandle {
 
   get canRedo(): boolean {
     return this.inner.canRedo();
+  }
+
+  // Selection. Lives in the core because it drives transforms; see lib.rs.
+
+  selectAt(x: number, y: number, additive: boolean): PressOutcome {
+    return this.inner.selectAt(x, y, additive) as PressOutcome;
+  }
+
+  selectLayer(id: string, additive: boolean): void {
+    this.inner.selectLayer(id, additive);
+  }
+
+  selectAll(): void {
+    this.inner.selectAll();
+  }
+
+  clearSelection(): void {
+    this.inner.clearSelection();
+  }
+
+  get selectionCount(): number {
+    return this.inner.selectionCount();
+  }
+
+  /** Track the node under the pointer; true if that changed. */
+  hover(x: number, y: number): boolean {
+    return this.inner.hover(x, y);
+  }
+
+  clearHover(): boolean {
+    return this.inner.clearHover();
+  }
+
+  deleteSelection(): boolean {
+    return this.inner.deleteSelection();
+  }
+
+  nudge(dx: number, dy: number): boolean {
+    return this.inner.nudge(dx, dy);
+  }
+
+  // Gestures: begin* on press, updateGesture per move, endGesture on release.
+  // The whole drag lands in the journal as one undo step.
+
+  beginMove(x: number, y: number): boolean {
+    return this.inner.beginMove(x, y);
+  }
+
+  /** (u, v) picks the handle in unit frame coordinates: corners are 0|1, edge midpoints 0.5. */
+  beginScale(u: number, v: number, x: number, y: number): boolean {
+    return this.inner.beginScale(u, v, x, y);
+  }
+
+  beginRotate(x: number, y: number): boolean {
+    return this.inner.beginRotate(x, y);
+  }
+
+  beginCreate(shape: ShapeKind, x: number, y: number, color: Rgba): void {
+    this.inner.beginCreate(shape, x, y, new Uint8Array(color));
+  }
+
+  beginMarquee(x: number, y: number, additive: boolean): void {
+    this.inner.beginMarquee(x, y, additive);
+  }
+
+  updateGesture(x: number, y: number, shift: boolean, alt: boolean): void {
+    this.inner.updateGesture(x, y, shift, alt);
+  }
+
+  /** Returns the new node's id when the gesture drew a shape. */
+  endGesture(): string | undefined {
+    return this.inner.endGesture();
+  }
+
+  cancelGesture(): boolean {
+    return this.inner.cancelGesture();
+  }
+
+  overlay(): Overlay {
+    return JSON.parse(this.inner.overlay()) as Overlay;
   }
 
   /** RGBA bytes for the whole canvas. */

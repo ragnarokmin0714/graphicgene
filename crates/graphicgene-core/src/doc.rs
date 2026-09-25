@@ -107,6 +107,30 @@ impl Document {
         Ok((parent, index))
     }
 
+    /// Whether `id` is reachable from the root. Undo detaches rather than
+    /// deletes, so a live id is not necessarily part of the document.
+    pub fn is_attached(&self, id: NodeId) -> bool {
+        let mut cursor = id;
+        loop {
+            if cursor == self.root {
+                return true;
+            }
+            match self.nodes.get(cursor).and_then(|node| node.common.parent) {
+                Some(parent) => cursor = parent,
+                None => return false,
+            }
+        }
+    }
+
+    /// World transform of `id`'s parent: what maps its local transform into
+    /// document space. Identity for the root.
+    pub fn parent_world_transform(&self, id: NodeId) -> Result<Affine> {
+        match self.get(id)?.common.parent {
+            Some(parent) => self.world_transform(parent),
+            None => Ok(Affine::IDENTITY),
+        }
+    }
+
     pub fn children_of(&self, id: NodeId) -> Result<&[NodeId]> {
         Ok(self.get(id)?.children().unwrap_or(&[]))
     }

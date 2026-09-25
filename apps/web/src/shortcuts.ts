@@ -11,6 +11,8 @@ export type Shortcut = {
   key: string;
   mod?: boolean;
   shift?: boolean;
+  /** Keep firing while the key is held. Defaults to true only for modified shortcuts. */
+  repeat?: boolean;
   run: () => void;
 };
 
@@ -18,9 +20,9 @@ export type Shortcut = {
  * Window-level keyboard shortcuts.
  *
  * Ignored while focus is in a text field, so the future text tool and property
- * inputs can take the same keys. Auto-repeat only fires modified shortcuts:
- * holding Ctrl+Z steps back through history, holding R must not stamp out a
- * rectangle per repeat.
+ * inputs can take the same keys. By default auto-repeat only fires modified
+ * shortcuts: holding Ctrl+Z steps back through history, holding Delete must
+ * not keep deleting. Arrow nudges opt in with `repeat`.
  */
 export function useShortcuts(shortcuts: readonly Shortcut[]) {
   const latest = useRef(shortcuts);
@@ -44,7 +46,7 @@ export function useShortcuts(shortcuts: readonly Shortcut[]) {
       );
       if (!hit) return;
       event.preventDefault();
-      if (event.repeat && !hit.mod) return;
+      if (event.repeat && !(hit.repeat ?? hit.mod)) return;
       hit.run();
     };
     window.addEventListener("keydown", onKeyDown);

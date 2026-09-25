@@ -8,6 +8,8 @@ type Props = {
   onClick: () => void;
   shortcut?: readonly string[];
   disabled?: boolean;
+  /** Set for toggles such as tools; renders as pressed when true. */
+  active?: boolean;
   size?: "icon-sm" | "tool";
   side?: "top" | "bottom";
 };
@@ -19,6 +21,7 @@ export function IconButton({
   onClick,
   shortcut,
   disabled,
+  active,
   size = "icon-sm",
   side = "bottom",
 }: Props) {
@@ -27,7 +30,14 @@ export function IconButton({
       <TooltipTrigger asChild>
         {/* The span keeps the tooltip working while the button is disabled. */}
         <span className="inline-flex">
-          <Button size={size} onClick={onClick} disabled={disabled} aria-label={label}>
+          <Button
+            size={size}
+            onClick={onClick}
+            disabled={disabled}
+            aria-label={label}
+            aria-pressed={active}
+            className="aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 aria-pressed:hover:text-primary-foreground"
+          >
             {icon}
           </Button>
         </span>

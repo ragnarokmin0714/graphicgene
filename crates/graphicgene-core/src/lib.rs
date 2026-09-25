@@ -13,12 +13,17 @@ pub mod command;
 pub mod doc;
 pub mod error;
 pub mod geom;
+pub mod gesture;
+pub mod hit;
 pub mod layout;
 pub mod node;
 pub mod project;
+pub mod selection;
 
 pub use color::LinearRgba;
 pub use command::{Command, Journal};
 pub use doc::Document;
 pub use error::{CoreError, Result};
+pub use gesture::{Frame, Gesture, Modifiers, ShapeKind, TransformKind};
 pub use node::{BlendMode, Node, NodeId, NodeKind};
+pub use selection::Selection;

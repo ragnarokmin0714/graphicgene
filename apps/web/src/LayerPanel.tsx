@@ -11,8 +11,8 @@ import type { EditorHandle, LayerRow } from "@/editor";
 type Props = {
   editor: React.RefObject<EditorHandle | null>;
   revision: number;
-  selected: string | null;
-  onSelect: (id: string) => void;
+  /** A row was clicked; `additive` when Shift was held. */
+  onSelect: (id: string, additive: boolean) => void;
 };
 
 /** Indent per tree level, in px. Derived from data, so it is an inline style. */
@@ -20,12 +20,13 @@ const INDENT = 12;
 
 /**
  * Reads the layer tree from the core on every revision and keeps no copy.
- * The core already hands rows back in panel order (topmost first, no root).
+ * The core already hands rows back in panel order (topmost first, no root),
+ * and says which are selected — selection lives in the core too.
  *
  * Rows are `h-row` (28px) — the density token, not an ad-hoc height — so that
  * every future list in the app lines up without anyone re-deciding.
  */
-export function LayerPanel({ editor, revision, selected, onSelect }: Props) {
+export function LayerPanel({ editor, revision, onSelect }: Props) {
   const core = editor.current;
   // `revision` drives the re-read; referenced so the intent is visible.
   void revision;
@@ -50,8 +51,8 @@ export function LayerPanel({ editor, revision, selected, onSelect }: Props) {
             <ContextMenu key={layer.id}>
               <ContextMenuTrigger asChild>
                 <li
-                  onClick={() => onSelect(layer.id)}
-                  data-selected={layer.id === selected || undefined}
+                  onClick={(event) => onSelect(layer.id, event.shiftKey)}
+                  data-selected={layer.selected || undefined}
                   style={{ paddingLeft: 8 + layer.depth * INDENT }}
                   className="group h-row hover:bg-accent data-selected:bg-primary/12 dark:data-selected:bg-primary/22 flex cursor-default items-center gap-2 rounded-md pr-2 transition-colors"
                 >
@@ -96,7 +97,7 @@ function EmptyState() {
       </div>
       <p className="font-medium">No layers yet</p>
       <p className="text-muted-foreground leading-relaxed">
-        Press <Kbd>R</Kbd> for a rectangle or <Kbd>O</Kbd> for an ellipse.
+        Press <Kbd>R</Kbd> or <Kbd>O</Kbd>, then drag on the artboard.
       </p>
     </div>
   );

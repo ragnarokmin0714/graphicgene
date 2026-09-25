@@ -1,19 +1,29 @@
-import { Circle, Redo2, Square, Undo2 } from "lucide-react";
+import { Circle, MousePointer2, Redo2, Square, Undo2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
+import type { ShapeKind } from "@/editor";
 import { IconButton } from "@/IconButton";
 import { MOD, SHIFT } from "@/shortcuts";
 
+/** The active canvas tool. View state: which mode the pointer is in. */
+export type Tool = "select" | ShapeKind;
+
 type Props = {
-  onAddRect: () => void;
-  onAddEllipse: () => void;
+  tool: Tool;
+  onToolChange: (tool: Tool) => void;
   onUndo: () => void;
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
 };
 
+const TOOLS: { tool: Tool; label: string; icon: React.ReactNode; key: string }[] = [
+  { tool: "select", label: "Select", icon: <MousePointer2 />, key: "V" },
+  { tool: "rect", label: "Rectangle", icon: <Square />, key: "R" },
+  { tool: "ellipse", label: "Ellipse", icon: <Circle />, key: "O" },
+];
+
 /**
- * The floating dock over the canvas. Shapes and history live here, next to
+ * The floating dock over the canvas. Tools and history live here, next to
  * the work, rather than in the header.
  */
 export function ToolDock(props: Props) {
@@ -23,22 +33,18 @@ export function ToolDock(props: Props) {
       aria-label="Tools"
       className="bg-card/85 shadow-float absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-xl border p-1 backdrop-blur-md"
     >
-      <IconButton
-        size="tool"
-        side="top"
-        label="Rectangle"
-        icon={<Square />}
-        onClick={props.onAddRect}
-        shortcut={["R"]}
-      />
-      <IconButton
-        size="tool"
-        side="top"
-        label="Ellipse"
-        icon={<Circle />}
-        onClick={props.onAddEllipse}
-        shortcut={["O"]}
-      />
+      {TOOLS.map(({ tool, label, icon, key }) => (
+        <IconButton
+          key={tool}
+          size="tool"
+          side="top"
+          label={label}
+          icon={icon}
+          onClick={() => props.onToolChange(tool)}
+          shortcut={[key]}
+          active={props.tool === tool}
+        />
+      ))}
       <Separator orientation="vertical" className="mx-1 !h-5" />
       <IconButton
         size="tool"

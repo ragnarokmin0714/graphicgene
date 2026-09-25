@@ -59,6 +59,10 @@ pub enum Command {
         id: NodeId,
         path: BezPath,
     },
+    /// Several commands as one undo step — a drag that moves five nodes, or a
+    /// delete of the whole selection. All or nothing: if one fails, the ones
+    /// already applied are rolled back.
+    Batch(Vec<Command>),
 }
 
 impl Command {
@@ -156,6 +160,27 @@ impl Command {
                     NodeKind::Group(_) => Err(CoreError::MissingNode(*id)),
                 }
             }
+
+            Command::Batch(commands) => {
+                let mut inverses = Vec::with_capacity(commands.len());
+                for command in commands {
+                    match command.apply(doc) {
+                        Ok(inverse) => inverses.push(inverse),
+                        Err(e) => {
+                            // A half-applied batch is exactly the state undo
+                            // cannot describe, so put the document back. The
+                            // inverses were produced by successful applies, so
+                            // they apply cleanly in reverse.
+                            for inverse in inverses.iter().rev() {
+                                let _ = inverse.apply(doc);
+                            }
+                            return Err(e);
+                        }
+                    }
+                }
+                inverses.reverse();
+                Ok(Command::Batch(inverses))
+            }
         }
     }
 
@@ -171,6 +196,7 @@ impl Command {
             | Command::Rename { id, .. }
             | Command::SetFill { id, .. }
             | Command::SetPath { id, .. } => Some(*id),
+            Command::Batch(commands) => commands.first().and_then(Command::target),
         }
     }
 }

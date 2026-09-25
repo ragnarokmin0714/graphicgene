@@ -62,4 +62,44 @@ assert.deepEqual(
   "layer rows should list the topmost node first and omit the root",
 );
 
+// Canvas interaction: draw, select, drag, delete — each one undo step.
+const WHITE = [255, 255, 255, 255];
+const canvas = new Editor(W, H);
+canvas.beginCreate("rect", 10, 10, RED);
+canvas.updateGesture(20, 20, false, false);
+canvas.updateGesture(30, 30, false, false);
+const drawn = canvas.endGesture();
+assert.ok(drawn, "drawing a shape should return its id");
+assert.deepEqual(pixel(canvas.render(), 20, 20), [255, 0, 0, 255], "drawn rect should render");
+assert.equal(canvas.selectionCount(), 1, "a drawn shape becomes the selection");
+assert.equal(JSON.parse(canvas.layerTree())[0].selected, true, "layer rows report selection");
+
+assert.equal(canvas.selectAt(60, 60, false), "miss", "empty space selects nothing");
+assert.equal(canvas.selectionCount(), 0, "clicking empty space clears the selection");
+assert.equal(JSON.parse(canvas.overlay()).frame, null, "no selection, no frame");
+
+assert.equal(canvas.selectAt(20, 20, false), "drag", "clicking the rect selects it");
+assert.equal(canvas.beginMove(20, 20), true);
+for (let step = 1; step <= 20; step++) canvas.updateGesture(20 + step, 20 + step, false, false);
+assert.equal(JSON.parse(canvas.overlay()).gesture, "move");
+canvas.endGesture();
+data = canvas.render();
+assert.deepEqual(pixel(data, 15, 15), WHITE, "drag should vacate the old spot");
+assert.deepEqual(pixel(data, 45, 45), [255, 0, 0, 255], "drag should fill the new spot");
+const corners = JSON.parse(canvas.overlay()).frame.corners;
+assert.deepEqual(corners[0], [30, 30], "overlay frame should follow the drag");
+
+canvas.undo();
+assert.deepEqual(pixel(canvas.render(), 15, 15), [255, 0, 0, 255], "one undo reverts the whole drag");
+canvas.redo();
+
+assert.equal(canvas.selectAt(45, 45, true), "hit", "shift-click on a selected node deselects it");
+assert.equal(canvas.selectionCount(), 0);
+
+canvas.selectAll();
+assert.equal(canvas.deleteSelection(), true);
+assert.deepEqual(pixel(canvas.render(), 45, 45), WHITE, "delete removes the shape");
+canvas.undo();
+assert.deepEqual(pixel(canvas.render(), 45, 45), [255, 0, 0, 255], "undo restores it");
+
 console.log("smoke: ok");

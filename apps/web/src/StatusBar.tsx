@@ -2,10 +2,11 @@ type Props = {
   width: number;
   height: number;
   layerCount: number;
+  selectionCount: number;
   notice: string | null;
 };
 
-export function StatusBar({ width, height, layerCount, notice }: Props) {
+export function StatusBar({ width, height, layerCount, selectionCount, notice }: Props) {
   return (
     <footer className="bg-card text-muted-foreground text-label h-status flex shrink-0 items-center gap-3 border-t px-3 tabular-nums">
       <span>
@@ -17,6 +18,12 @@ export function StatusBar({ width, height, layerCount, notice }: Props) {
       <span>
         {layerCount} {layerCount === 1 ? "layer" : "layers"}
       </span>
+      {selectionCount > 0 && (
+        <>
+          <span aria-hidden="true" className="bg-border h-3 w-px" />
+          <span className="text-primary font-medium">{selectionCount} selected</span>
+        </>
+      )}
       {notice && (
         <span role="status" className="ml-auto">
           {notice}
