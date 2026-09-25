@@ -6,9 +6,23 @@ Designed so that raster and UI-design features can be added later without
 rewriting the core — the document model, colour pipeline and render boundary are
 already shaped for it.
 
-> **Status: early.** The core, renderer and app shell work end to end — you can
-> draw shapes, undo/redo, and save/reload a project. The pen tool, selection and
-> SVG export are still missing, and nothing has been verified in a browser yet.
+> **Status: v0.1 preview.** Draw rectangles, ellipses and bezier paths with a
+> pen tool; select, move, scale and rotate them; edit any path point by point;
+> undo everything. Work autosaves in the browser, project files can be
+> downloaded and reopened, and the artwork exports as SVG.
+
+### Using it
+
+| | |
+|---|---|
+| `V` `R` `O` `P` | Select, Rectangle, Ellipse, Pen |
+| Drag with a shape tool | Draw it — `Shift` for equal sides, `Alt` from the centre |
+| Pen | Click for a corner, drag for a curve; click the first point to close, `Enter` to finish |
+| Double-click a path | Edit its points: drag points and handles, click a segment to add a point, double-click a point for corner/curve |
+| Handles on a selection | Scale (`Shift` keeps proportions, `Alt` from the centre); just outside a corner rotates (`Shift` snaps to 15°) |
+| Arrow keys | Nudge 1px, 10px with `Shift` |
+| `Ctrl/⌘ Z`, `Ctrl/⌘ Shift Z` | Undo, redo |
+| `Ctrl/⌘ O`, `Ctrl/⌘ Shift E` | Open a project file, export SVG |
 
 ## Architecture
 
