@@ -102,4 +102,53 @@ assert.deepEqual(pixel(canvas.render(), 45, 45), WHITE, "delete removes the shap
 canvas.undo();
 assert.deepEqual(pixel(canvas.render(), 45, 45), [255, 0, 0, 255], "undo restores it");
 
+// Pen: three clicks, then a click on the first anchor closes the path.
+const TOL = 3;
+const pen = new Editor(W, H);
+for (const [x, y] of [
+  [10, 10],
+  [50, 10],
+  [50, 50],
+]) {
+  pen.penPress(x, y, false, TOL, RED);
+  assert.equal(pen.penRelease(), undefined, "a plain click does not finish the path");
+}
+assert.equal(JSON.parse(pen.overlay()).mode, "pen");
+pen.penHover(11, 11, TOL);
+assert.equal(JSON.parse(pen.overlay()).pen.closable, true, "the first anchor offers to close");
+pen.penPress(11, 11, false, TOL, RED);
+const penPath = pen.penRelease();
+assert.ok(penPath, "closing finishes the path");
+assert.equal(JSON.parse(pen.overlay()).mode, null, "the pen hands back to normal mode");
+assert.equal(pen.selectionCount(), 1, "the finished path is selected");
+data = pen.render();
+assert.notDeepEqual(pixel(data, 30, 10), WHITE, "pen paths are stroked");
+assert.deepEqual(pixel(data, 40, 20), WHITE, "and not filled");
+pen.undo();
+assert.deepEqual(pixel(pen.render(), 30, 10), WHITE, "the whole pen path is one undo step");
+pen.redo();
+
+// Path editing: drag an anchor, insert one on a segment, delete it.
+pen.selectLayer(penPath, false);
+assert.equal(pen.beginPathEdit(), true);
+let edit = JSON.parse(pen.overlay());
+assert.equal(edit.mode, "path");
+assert.equal(edit.path.anchors.length, 3);
+assert.equal(pen.pathPress(50, 50, TOL, false), "anchor");
+pen.pathDrag(60, 58, false, false);
+assert.equal(pen.pathRelease(), true, "a moved anchor is an edit");
+assert.deepEqual(JSON.parse(pen.overlay()).path.anchors[2].at, [60, 58]);
+pen.undo();
+edit = JSON.parse(pen.overlay());
+assert.equal(edit.mode, "path", "undo keeps path editing on");
+assert.deepEqual(edit.path.anchors[2].at, [50, 50], "undo puts the anchor back");
+
+assert.equal(pen.pathPress(30, 10, TOL, false), "segment");
+pen.pathRelease();
+assert.equal(JSON.parse(pen.overlay()).path.anchors.length, 4, "clicking a segment adds an anchor");
+assert.equal(pen.deleteSelection(), true);
+assert.equal(JSON.parse(pen.overlay()).path.anchors.length, 3, "Delete removes the selected anchor");
+assert.equal(pen.finishMode(), true);
+assert.equal(JSON.parse(pen.overlay()).mode, null);
+
 console.log("smoke: ok");

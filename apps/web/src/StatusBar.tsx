@@ -3,10 +3,12 @@ type Props = {
   height: number;
   layerCount: number;
   selectionCount: number;
+  /** How to use the current tool or mode, when that is not obvious. */
+  hint: string | null;
   notice: string | null;
 };
 
-export function StatusBar({ width, height, layerCount, selectionCount, notice }: Props) {
+export function StatusBar({ width, height, layerCount, selectionCount, hint, notice }: Props) {
   return (
     <footer className="bg-card text-muted-foreground text-label h-status flex shrink-0 items-center gap-3 border-t px-3 tabular-nums">
       <span>
@@ -24,11 +26,17 @@ export function StatusBar({ width, height, layerCount, selectionCount, notice }:
           <span className="text-primary font-medium">{selectionCount} selected</span>
         </>
       )}
-      {notice && (
-        <span role="status" className="ml-auto">
-          {notice}
-        </span>
-      )}
+      <span className="ml-auto flex min-w-0 items-center gap-3">
+        {hint && <span className="text-foreground/70 truncate">{hint}</span>}
+        {notice && (
+          <>
+            {hint && <span aria-hidden="true" className="bg-border h-3 w-px shrink-0" />}
+            <span role="status" className="shrink-0">
+              {notice}
+            </span>
+          </>
+        )}
+      </span>
     </footer>
   );
 }

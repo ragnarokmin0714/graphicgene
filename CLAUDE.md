@@ -9,13 +9,14 @@ rewriting the core.
 Drawing, selection and transforms work: rectangles and ellipses are dragged
 out on the artboard, and nodes can be selected (click, Shift-click, marquee,
 layer panel), moved, scaled and rotated with handles, nudged and deleted — each
-one undo step. The pen tool and SVG export (plus IndexedDB autosave) are what
-remain before v0.1 is done.
+one undo step. The pen tool draws bezier paths, and any path (rectangles and
+ellipses included) can be edited point by point. SVG export and IndexedDB
+autosave are what remain before v0.1 is done.
 
-**Verified:** 33 Rust tests, `clippy --all-targets -D warnings` clean, the web
+**Verified:** 53 Rust tests, `clippy --all-targets -D warnings` clean, the web
 build, and `apps/web/scripts/smoke.mjs` — which drives the real wasm module
 through draw / transform / undo / redo / save / reload and asserts on rendered
-pixels, including a draw / select / drag / delete pass. These four are the
+pixels, including draw / select / drag / delete and pen / path-edit passes. These four are the
 bar for any change.
 
 **Browser-checked 2026-09-25** by Roger on the deployed Pages build: shapes
@@ -24,7 +25,7 @@ restores the document, edges are crisp, and the console is clean apart from a
 missing favicon (since fixed). This box has no browser engine, so anything
 changed after that date is verified headlessly only until he looks again — in
 particular the theme switch, the redesigned chrome, and all canvas
-interaction (tools, handles, marquee, shortcuts). The React side of that
+interaction (tools, handles, marquee, pen, path editing, shortcuts). The React side of that
 interaction was exercised once in jsdom against the real wasm core — a
 one-off scratch harness, not part of the repo — which is the closest this box
 gets to a browser.
@@ -204,6 +205,11 @@ DOM-rendering Rust framework such as Dioxus, not an immediate-mode toolkit.
   is one undo step and Escape restores the press-time state. See
   `gesture.rs`. Selection is session state in core (`selection.rs`): not
   saved, not undoable, but shared with the future desktop app.
+- The pen and path editing work on an anchor view of the path
+  (`anchors.rs`); the file still stores plain `BezPath`s. A pen path joins
+  the journal only when finished, so undo while drawing removes the last
+  anchor (`pen.rs`); path edits commit one `SetPath` per drag
+  (`path_edit.rs`).
 - Undo/redo and replay are what the journal actually buys. **It does not decide
   collaboration**: multiplayer needs a conflict model (tree CRDT for node moves,
   or a server-authoritative sequencer), deferred until there is a reason to pick
@@ -224,7 +230,7 @@ graphicgene/
 ├── Cargo.toml              # Cargo workspace
 ├── pnpm-workspace.yaml     # pnpm workspace (pnpm only)
 ├── crates/
-│   ├── graphicgene-core/   # nodes, commands, selection, hit-testing, gestures, layout, project file
+│   ├── graphicgene-core/   # nodes, commands, selection, hit-testing, gestures, pen, layout, project file
 │   ├── graphicgene-render/ # RenderScene, Renderer trait, CPU renderer
 │   └── graphicgene-wasm/   # wasm-bindgen bindings (the batching boundary)
 └── apps/
@@ -260,8 +266,8 @@ Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 675 KB | 251 KB |
-| js (React + Radix + app) | 381 KB | 123 KB |
+| wasm (wasm-opt applied) | 720 KB | 271 KB |
+| js (React + Radix + app) | 387 KB | 125 KB |
 | css (incl. tw-animate-css) | 39 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |
 

@@ -97,7 +97,7 @@ function EmptyState() {
       </div>
       <p className="font-medium">No layers yet</p>
       <p className="text-muted-foreground leading-relaxed">
-        Press <Kbd>R</Kbd> or <Kbd>O</Kbd>, then drag on the artboard.
+        Press <Kbd>R</Kbd>, <Kbd>O</Kbd> or <Kbd>P</Kbd>, then draw on the artboard.
       </p>
     </div>
   );

@@ -36,8 +36,33 @@ export type Frame = {
   height: number;
 };
 
+/** A line from an anchor to one of its handles: ax, ay, hx, hy. */
+export type HandleLine = readonly [number, number, number, number];
+
+/** The pen's in-progress path. */
+export type PenOverlay = {
+  anchors: Point[];
+  /** Handles of the anchor being placed. */
+  handles: HandleLine[];
+  /** SVG path data from the last anchor to the pointer. */
+  preview: string | null;
+  /** A press now would close the path on its first anchor. */
+  closable: boolean;
+};
+
+/** The path whose anchors are being edited. */
+export type PathOverlay = {
+  outline: string;
+  anchors: { at: Point; selected: boolean }[];
+  /** Handles of the selected anchors. */
+  handles: HandleLine[];
+};
+
+export type EditorMode = "pen" | "path";
+
 /** What the selection overlay draws, all in document space. */
 export type Overlay = {
+  mode: EditorMode | null;
   frame: Frame | null;
   /** SVG path data for each selected node. */
   outlines: string[];
@@ -46,12 +71,17 @@ export type Overlay = {
   /** x0, y0, x1, y1 */
   marquee: readonly [number, number, number, number] | null;
   gesture: "move" | "scale" | "rotate" | "create" | "marquee" | null;
+  pen?: PenOverlay;
+  path?: PathOverlay;
 };
 
 export type ShapeKind = "rect" | "ellipse";
 
 /** What a select-tool press should turn into; see `selectAt` in the wasm crate. */
 export type PressOutcome = "drag" | "hit" | "miss";
+
+/** What a press while editing a path landed on. */
+export type PathPressOutcome = "handle" | "anchor" | "segment" | "miss";
 
 let ready: Promise<void> | null = null;
 
@@ -180,6 +210,63 @@ export class EditorHandle {
 
   cancelGesture(): boolean {
     return this.inner.cancelGesture();
+  }
+
+  // Pen and path editing. `tolerance` is a pick distance in document units:
+  // a screen distance divided by the zoom.
+
+  /** The first press starts a path; later ones add anchors. */
+  penPress(x: number, y: number, shift: boolean, tolerance: number, color: Rgba): void {
+    this.inner.penPress(x, y, shift, tolerance, new Uint8Array(color));
+  }
+
+  penDrag(x: number, y: number, shift: boolean): void {
+    this.inner.penDrag(x, y, shift);
+  }
+
+  /** Returns the path's id when the press completed it (closed or ended). */
+  penRelease(): string | undefined {
+    return this.inner.penRelease();
+  }
+
+  /** Track the pointer between presses; true while a path is being drawn. */
+  penHover(x: number, y: number, tolerance: number): boolean {
+    return this.inner.penHover(x, y, tolerance);
+  }
+
+  /** Finish the pen path or stop editing a path; true if either was active. */
+  finishMode(): boolean {
+    return this.inner.finishMode();
+  }
+
+  get mode(): EditorMode | null {
+    return (this.inner.mode() as EditorMode | undefined) ?? null;
+  }
+
+  /** Edit the anchors of the one selected path; false if that is not possible. */
+  beginPathEdit(): boolean {
+    return this.inner.beginPathEdit();
+  }
+
+  pathPress(x: number, y: number, tolerance: number, additive: boolean): PathPressOutcome {
+    return this.inner.pathPress(x, y, tolerance, additive) as PathPressOutcome;
+  }
+
+  pathDrag(x: number, y: number, shift: boolean, alt: boolean): void {
+    this.inner.pathDrag(x, y, shift, alt);
+  }
+
+  pathRelease(): boolean {
+    return this.inner.pathRelease();
+  }
+
+  pathCancelDrag(): void {
+    this.inner.pathCancelDrag();
+  }
+
+  /** Toggles corner/smooth on an anchor; returns whether editing continues. */
+  pathDoubleClick(x: number, y: number, tolerance: number): boolean {
+    return this.inner.pathDoubleClick(x, y, tolerance);
   }
 
   overlay(): Overlay {

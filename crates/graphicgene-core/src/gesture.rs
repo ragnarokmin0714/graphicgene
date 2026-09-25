@@ -17,7 +17,7 @@ use crate::geom::{
     Affine, BezPath, Ellipse, Point, Rect, Shape, Vec2, empty_bounds, is_empty_bounds, union,
 };
 use crate::hit;
-use crate::node::{Node, NodeId, NodeKind};
+use crate::node::{Node, NodeId};
 use crate::selection::Selection;
 
 /// A drag shorter than this, in document units, counts as a click. Clicking
@@ -290,7 +290,7 @@ impl Gesture {
             }
             Kind::Create { shape, id } => {
                 let rect = drawn_rect(self.start, point, modifiers);
-                set_path(doc, *id, shape.path(rect))?;
+                doc.write_path(*id, shape.path(rect))?;
             }
             Kind::Marquee { additive } => {
                 let hits = hit::nodes_in_rect(doc, Rect::from_points(self.start, point))?;
@@ -337,11 +337,7 @@ impl Gesture {
             Kind::Create { shape, id } => {
                 if !dragged {
                     let size = (DEFAULT_SHAPE_SIZE, DEFAULT_SHAPE_SIZE);
-                    set_path(
-                        doc,
-                        id,
-                        shape.path(Rect::from_origin_size(self.start, size)),
-                    )?;
+                    doc.write_path(id, shape.path(Rect::from_origin_size(self.start, size)))?;
                 }
                 // Re-attach through the journal: undo then detaches the node
                 // and redo re-attaches the same id, path and all.
@@ -523,13 +519,6 @@ fn drawn_rect(start: Point, point: Point, modifiers: Modifiers) -> Rect {
     } else {
         Rect::from_points(start, start + d)
     }
-}
-
-fn set_path(doc: &mut Document, id: NodeId, path: BezPath) -> Result<()> {
-    if let NodeKind::Vector(vector) = &mut doc.get_mut(id)?.kind {
-        vector.path = path;
-    }
-    Ok(())
 }
 
 fn is_mid(t: f64) -> bool {

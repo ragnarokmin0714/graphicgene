@@ -13,10 +13,12 @@
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::{Command, Journal};
 use graphicgene_core::doc::Document;
-use graphicgene_core::geom::{Affine, BezPath, Point, Rect, Shape};
+use graphicgene_core::geom::{Affine, BezPath, Point, Rect, Shape, Vec2};
 use graphicgene_core::gesture::{self, Frame, Gesture, Modifiers, ShapeKind, TransformKind};
 use graphicgene_core::hit;
-use graphicgene_core::node::{Node, NodeId, NodeKind};
+use graphicgene_core::node::{Node, NodeId, NodeKind, Stroke};
+use graphicgene_core::path_edit::{DeleteOutcome, PathEdit, PressOutcome};
+use graphicgene_core::pen::PenSession;
 use graphicgene_core::project::Project;
 use graphicgene_core::selection::Selection;
 use graphicgene_render::{CpuRenderer, RenderScene, Renderer};
@@ -39,11 +41,18 @@ pub struct Editor {
     gesture: Option<Gesture>,
     /// The node under the pointer, for the hover outline.
     hover: Option<NodeId>,
+    /// A path being drawn with the pen, if any.
+    pen: Option<PenSession>,
+    /// The path whose anchors are being edited, if any. Never at the same
+    /// time as `pen`.
+    path_edit: Option<PathEdit>,
 }
 
 /// How far outside a shape a click still hits it, in document units.
 /// When zoom arrives this becomes a screen distance divided by the zoom.
 const HIT_TOLERANCE: f64 = 4.0;
+/// Stroke width for paths drawn with the pen, in document units.
+const PEN_STROKE_WIDTH: f64 = 2.0;
 
 #[wasm_bindgen]
 impl Editor {
@@ -61,6 +70,8 @@ impl Editor {
             selection: Selection::new(),
             gesture: None,
             hover: None,
+            pen: None,
+            path_edit: None,
         })
     }
 
@@ -118,28 +129,44 @@ impl Editor {
         self.execute(Command::SetTransform { id, transform })
     }
 
+    /// Undo. While the pen is drawing, this removes the last anchor instead:
+    /// the unfinished path is not in the journal yet.
     pub fn undo(&mut self) -> Result<bool, JsError> {
         self.cancel_gesture()?;
+        if let Some(pen) = self.pen.as_mut() {
+            if !pen.undo_anchor(&mut self.document).map_err(to_js)? {
+                let pen = self.pen.take().expect("checked above");
+                pen.cancel(&mut self.document, &mut self.selection)
+                    .map_err(to_js)?;
+            }
+            self.scene_dirty = true;
+            return Ok(true);
+        }
+        self.cancel_path_drag()?;
         let changed = self.journal.undo(&mut self.document).map_err(to_js)?;
-        self.after_history_change(changed);
+        self.after_history_change(changed)?;
         Ok(changed)
     }
 
     pub fn redo(&mut self) -> Result<bool, JsError> {
+        if self.pen.is_some() {
+            return Ok(false);
+        }
         self.cancel_gesture()?;
+        self.cancel_path_drag()?;
         let changed = self.journal.redo(&mut self.document).map_err(to_js)?;
-        self.after_history_change(changed);
+        self.after_history_change(changed)?;
         Ok(changed)
     }
 
     #[wasm_bindgen(js_name = canUndo)]
     pub fn can_undo(&self) -> bool {
-        self.journal.can_undo()
+        self.pen.is_some() || self.journal.can_undo()
     }
 
     #[wasm_bindgen(js_name = canRedo)]
     pub fn can_redo(&self) -> bool {
-        self.journal.can_redo()
+        self.pen.is_none() && self.journal.can_redo()
     }
 
     /// Render and return RGBA bytes for the whole canvas.
@@ -176,6 +203,8 @@ impl Editor {
     pub fn load_json(&mut self, text: &str) -> Result<(), JsError> {
         let project = Project::from_json(text).map_err(to_js)?;
         self.gesture = None;
+        self.pen = None;
+        self.path_edit = None;
         self.document = project.document;
         self.journal.clear();
         self.selection.clear();
@@ -254,6 +283,7 @@ impl Editor {
     #[wasm_bindgen(js_name = selectLayer)]
     pub fn select_layer(&mut self, id: &str, additive: bool) -> Result<(), JsError> {
         let id = parse_id(&self.document, id)?;
+        self.finish_mode()?;
         if additive {
             self.selection.toggle(id);
         } else {
@@ -264,14 +294,17 @@ impl Editor {
 
     #[wasm_bindgen(js_name = selectAll)]
     pub fn select_all(&mut self) -> Result<(), JsError> {
+        self.finish_mode()?;
         let ids = hit::selectable(&self.document).map_err(to_js)?;
         self.selection.set(ids);
         Ok(())
     }
 
     #[wasm_bindgen(js_name = clearSelection)]
-    pub fn clear_selection(&mut self) {
+    pub fn clear_selection(&mut self) -> Result<(), JsError> {
+        self.finish_mode()?;
         self.selection.clear();
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = selectionCount)]
@@ -293,9 +326,31 @@ impl Editor {
         self.hover.take().is_some()
     }
 
-    /// Remove the selected nodes, as one undo step.
+    /// Delete, as one undo step, whatever the current mode has selected:
+    /// the last pen anchor while drawing, the selected anchors while editing
+    /// a path, otherwise the selected nodes.
     #[wasm_bindgen(js_name = deleteSelection)]
     pub fn delete_selection(&mut self) -> Result<bool, JsError> {
+        if self.pen.is_some() {
+            return self.undo();
+        }
+        if let Some(edit) = self.path_edit.as_mut() {
+            let outcome = edit
+                .delete_selected(&mut self.document, &mut self.journal)
+                .map_err(to_js)?;
+            match outcome {
+                DeleteOutcome::Nothing => return Ok(false),
+                DeleteOutcome::Anchors => {}
+                DeleteOutcome::EmptiedPath => {
+                    let id = edit.id();
+                    self.path_edit = None;
+                    self.execute(Command::Detach { id })?;
+                    self.selection.clear();
+                }
+            }
+            self.scene_dirty = true;
+            return Ok(true);
+        }
         if self.selection.is_empty() {
             return Ok(false);
         }
@@ -313,7 +368,17 @@ impl Editor {
 
     /// Move the selection by (dx, dy) document units, as one undo step.
     pub fn nudge(&mut self, dx: f64, dy: f64) -> Result<bool, JsError> {
-        if self.selection.is_empty() || self.gesture.is_some() {
+        if self.pen.is_some() || self.gesture.is_some() {
+            return Ok(false);
+        }
+        if let Some(edit) = self.path_edit.as_mut() {
+            let moved = edit
+                .nudge(&mut self.document, &mut self.journal, Vec2::new(dx, dy))
+                .map_err(to_js)?;
+            self.scene_dirty |= moved;
+            return Ok(moved);
+        }
+        if self.selection.is_empty() {
             return Ok(false);
         }
         let command = gesture::world_delta_command(
@@ -440,6 +505,222 @@ impl Editor {
         Ok(true)
     }
 
+    // ---- Pen -----------------------------------------------------------------
+    //
+    // Presses place anchors, drags pull out handles, and the path is one undo
+    // step once finished. `tolerance` is how near to an existing end anchor
+    // counts as pressing it, in document units — a screen distance the UI
+    // converts, like handle sizes.
+
+    /// A press with the pen tool. The first press starts a new path.
+    #[wasm_bindgen(js_name = penPress)]
+    pub fn pen_press(
+        &mut self,
+        x: f64,
+        y: f64,
+        shift: bool,
+        tolerance: f64,
+        srgb: &[u8],
+    ) -> Result<(), JsError> {
+        let point = Point::new(x, y);
+        let modifiers = Modifiers { shift, alt: false };
+        match self.pen.as_mut() {
+            Some(pen) => pen
+                .press(&mut self.document, point, modifiers, tolerance)
+                .map_err(to_js)?,
+            None => {
+                self.cancel_gesture()?;
+                self.end_path_edit()?;
+                let stroke = Stroke {
+                    color: fill_from_bytes(srgb)?,
+                    width: PEN_STROKE_WIDTH,
+                };
+                let pen = PenSession::start(&mut self.document, &mut self.selection, stroke, point)
+                    .map_err(to_js)?;
+                self.pen = Some(pen);
+            }
+        }
+        self.hover = None;
+        self.scene_dirty = true;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = penDrag)]
+    pub fn pen_drag(&mut self, x: f64, y: f64, shift: bool) -> Result<(), JsError> {
+        let Some(pen) = self.pen.as_mut() else {
+            return Ok(());
+        };
+        let modifiers = Modifiers { shift, alt: false };
+        pen.drag(&mut self.document, Point::new(x, y), modifiers)
+            .map_err(to_js)?;
+        self.scene_dirty = true;
+        Ok(())
+    }
+
+    /// End of a pen press. When that completed the path (it closed, or ended
+    /// on its last anchor), the path is finished and its id returned.
+    #[wasm_bindgen(js_name = penRelease)]
+    pub fn pen_release(&mut self) -> Result<Option<String>, JsError> {
+        match self.pen.as_mut() {
+            Some(pen) if pen.release() => self.pen_finish(),
+            _ => Ok(None),
+        }
+    }
+
+    /// Track the pointer between pen presses, for the preview segment.
+    #[wasm_bindgen(js_name = penHover)]
+    pub fn pen_hover(&mut self, x: f64, y: f64, tolerance: f64) -> bool {
+        match self.pen.as_mut() {
+            Some(pen) => {
+                pen.hover(Point::new(x, y), tolerance);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Finish the path being drawn. Returns its id, or nothing if there was
+    /// no path or it was too short to keep.
+    #[wasm_bindgen(js_name = penFinish)]
+    pub fn pen_finish(&mut self) -> Result<Option<String>, JsError> {
+        let Some(pen) = self.pen.take() else {
+            return Ok(None);
+        };
+        let id = pen
+            .finish(&mut self.document, &mut self.journal, &mut self.selection)
+            .map_err(to_js)?;
+        self.scene_dirty = true;
+        Ok(id.map(encode_id))
+    }
+
+    /// Leave whichever mode is active: finish the pen path, or stop editing
+    /// a path. Returns whether there was one — what Enter and Escape check
+    /// before falling back to their other meanings.
+    #[wasm_bindgen(js_name = finishMode)]
+    pub fn finish_mode(&mut self) -> Result<bool, JsError> {
+        if self.pen.is_some() {
+            self.pen_finish()?;
+            return Ok(true);
+        }
+        if self.path_edit.is_some() {
+            self.end_path_edit()?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// "pen" while a path is being drawn, "path" while one is being edited,
+    /// nothing otherwise. Cheap, for UI that only needs the mode.
+    pub fn mode(&self) -> Option<String> {
+        if self.pen.is_some() {
+            Some("pen".to_owned())
+        } else if self.path_edit.is_some() {
+            Some("path".to_owned())
+        } else {
+            None
+        }
+    }
+
+    // ---- Path editing ----------------------------------------------------------
+
+    /// Start editing the anchors of the selected path. Returns false unless
+    /// exactly one vector node is selected.
+    #[wasm_bindgen(js_name = beginPathEdit)]
+    pub fn begin_path_edit(&mut self) -> Result<bool, JsError> {
+        if self.pen.is_some() {
+            return Ok(false);
+        }
+        let &[id] = self.selection.ids() else {
+            return Ok(false);
+        };
+        self.cancel_gesture()?;
+        self.path_edit = PathEdit::begin(&self.document, id).map_err(to_js)?;
+        self.hover = None;
+        Ok(self.path_edit.is_some())
+    }
+
+    /// A press while editing a path: "handle", "anchor", "segment" (an
+    /// anchor was inserted there) or "miss".
+    #[wasm_bindgen(js_name = pathPress)]
+    pub fn path_press(
+        &mut self,
+        x: f64,
+        y: f64,
+        tolerance: f64,
+        additive: bool,
+    ) -> Result<String, JsError> {
+        let Some(edit) = self.path_edit.as_mut() else {
+            return Ok("miss".to_owned());
+        };
+        let outcome = edit
+            .press(&mut self.document, Point::new(x, y), tolerance, additive)
+            .map_err(to_js)?;
+        self.scene_dirty = true;
+        Ok(match outcome {
+            PressOutcome::Handle => "handle",
+            PressOutcome::Anchor => "anchor",
+            PressOutcome::Segment => "segment",
+            PressOutcome::Miss => "miss",
+        }
+        .to_owned())
+    }
+
+    #[wasm_bindgen(js_name = pathDrag)]
+    pub fn path_drag(&mut self, x: f64, y: f64, shift: bool, alt: bool) -> Result<(), JsError> {
+        let Some(edit) = self.path_edit.as_mut() else {
+            return Ok(());
+        };
+        edit.update(
+            &mut self.document,
+            Point::new(x, y),
+            Modifiers { shift, alt },
+        )
+        .map_err(to_js)?;
+        self.scene_dirty = true;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = pathRelease)]
+    pub fn path_release(&mut self) -> Result<bool, JsError> {
+        let Some(edit) = self.path_edit.as_mut() else {
+            return Ok(false);
+        };
+        let changed = edit
+            .release(&mut self.document, &mut self.journal)
+            .map_err(to_js)?;
+        self.scene_dirty = true;
+        Ok(changed)
+    }
+
+    #[wasm_bindgen(js_name = pathCancelDrag)]
+    pub fn path_cancel_drag(&mut self) -> Result<(), JsError> {
+        self.cancel_path_drag()
+    }
+
+    /// A double-click while editing: on an anchor it toggles corner/smooth;
+    /// on the path it does nothing; off the path it stops editing. Returns
+    /// whether editing continues.
+    #[wasm_bindgen(js_name = pathDoubleClick)]
+    pub fn path_double_click(&mut self, x: f64, y: f64, tolerance: f64) -> Result<bool, JsError> {
+        let Some(edit) = self.path_edit.as_mut() else {
+            return Ok(false);
+        };
+        let point = Point::new(x, y);
+        let toggled = edit
+            .toggle_smooth_at(&mut self.document, &mut self.journal, point, tolerance)
+            .map_err(to_js)?;
+        if toggled {
+            self.scene_dirty = true;
+            return Ok(true);
+        }
+        let id = edit.id();
+        if hit::hit_test(&self.document, point, tolerance).map_err(to_js)? == Some(id) {
+            return Ok(true);
+        }
+        self.end_path_edit()?;
+        Ok(false)
+    }
+
     /// Everything the selection overlay draws, as JSON, in document units.
     ///
     /// One call per frame, not one per node: frame corners, outline paths of
@@ -447,6 +728,29 @@ impl Editor {
     /// hit-tested by the UI from the frame corners, since their size is a
     /// screen measurement, not a document one.
     pub fn overlay(&self) -> Result<String, JsError> {
+        if let Some(pen) = &self.pen {
+            return to_json(&self.pen_overlay(pen));
+        }
+        if let Some(edit) = &self.path_edit {
+            let view = edit.view(&self.document).map_err(to_js)?;
+            return to_json(&serde_json::json!({
+                "mode": "path",
+                "frame": null,
+                "outlines": [],
+                "hover": null,
+                "marquee": null,
+                "gesture": null,
+                "path": {
+                    "outline": view.outline.to_svg(),
+                    "anchors": view.anchors.iter().map(|(p, selected)| serde_json::json!({
+                        "at": [p.x, p.y],
+                        "selected": selected,
+                    })).collect::<Vec<_>>(),
+                    "handles": view.handles.iter().map(|(a, h)| [a.x, a.y, h.x, h.y]).collect::<Vec<_>>(),
+                },
+            }));
+        }
+
         let frame = match &self.gesture {
             Some(gesture) => match gesture.frame() {
                 Some(frame) => Some(frame),
@@ -481,14 +785,14 @@ impl Editor {
             .and_then(Gesture::marquee_rect)
             .map(|r| [r.x0, r.y0, r.x1, r.y1]);
 
-        let json = serde_json::json!({
+        to_json(&serde_json::json!({
+            "mode": null,
             "frame": frame,
             "outlines": outlines,
             "hover": hover,
             "marquee": marquee,
             "gesture": self.gesture.as_ref().map(Gesture::label),
-        });
-        serde_json::to_string(&json).map_err(|e| JsError::new(&e.to_string()))
+        }))
     }
 }
 
@@ -502,14 +806,66 @@ impl Editor {
         Ok(started)
     }
 
-    fn after_history_change(&mut self, changed: bool) {
-        if changed {
-            self.scene_dirty = true;
-            self.selection.retain_attached(&self.document);
-            if self.hover.is_some_and(|id| !self.document.is_attached(id)) {
-                self.hover = None;
+    fn after_history_change(&mut self, changed: bool) -> Result<(), JsError> {
+        if !changed {
+            return Ok(());
+        }
+        self.scene_dirty = true;
+        self.selection.retain_attached(&self.document);
+        if self.hover.is_some_and(|id| !self.document.is_attached(id)) {
+            self.hover = None;
+        }
+        if let Some(edit) = self.path_edit.as_mut() {
+            if self.document.is_attached(edit.id()) {
+                edit.revalidate(&self.document).map_err(to_js)?;
+            } else {
+                self.path_edit = None;
             }
         }
+        Ok(())
+    }
+
+    fn cancel_path_drag(&mut self) -> Result<(), JsError> {
+        if let Some(edit) = self.path_edit.as_mut() {
+            edit.cancel_drag(&mut self.document).map_err(to_js)?;
+            self.scene_dirty = true;
+        }
+        Ok(())
+    }
+
+    fn end_path_edit(&mut self) -> Result<(), JsError> {
+        self.cancel_path_drag()?;
+        self.path_edit = None;
+        Ok(())
+    }
+
+    fn pen_overlay(&self, pen: &PenSession) -> serde_json::Value {
+        let anchors = pen.anchors();
+        // Handles of the anchor being placed, so a drag shows what it pulls.
+        let handles: Vec<[f64; 4]> = anchors
+            .last()
+            .map(|a| {
+                [a.handle_in, a.handle_out]
+                    .into_iter()
+                    .flatten()
+                    .map(|h| [a.point.x, a.point.y, h.x, h.y])
+                    .collect()
+            })
+            .unwrap_or_default();
+        serde_json::json!({
+            "mode": "pen",
+            "frame": null,
+            "outlines": [],
+            "hover": null,
+            "marquee": null,
+            "gesture": null,
+            "pen": {
+                "anchors": anchors.iter().map(|a| [a.point.x, a.point.y]).collect::<Vec<_>>(),
+                "handles": handles,
+                "preview": pen.preview().map(|p| p.to_svg()),
+                "closable": pen.closable(),
+            },
+        })
     }
 
     /// A node's outline as an SVG path in document space, for the overlay.
@@ -578,6 +934,10 @@ fn parse_id(doc: &Document, id: &str) -> Result<NodeId, JsError> {
         return Err(JsError::new("unknown node id"));
     }
     Ok(id)
+}
+
+fn to_json(value: &serde_json::Value) -> Result<String, JsError> {
+    serde_json::to_string(value).map_err(|e| JsError::new(&e.to_string()))
 }
 
 fn to_js(e: graphicgene_core::error::CoreError) -> JsError {

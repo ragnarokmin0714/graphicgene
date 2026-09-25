@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { Rgba } from "@/editor";
+import type { EditorMode, Rgba } from "@/editor";
 import { Header } from "@/Header";
 import { LayerPanel } from "@/LayerPanel";
-import { type Shortcut, useShortcuts } from "@/shortcuts";
+import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
 import { StatusBar } from "@/StatusBar";
 import { type Tool, ToolDock } from "@/ToolDock";
@@ -27,6 +27,25 @@ const SWATCHES: readonly Rgba[] = [
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 
+/** Status-bar guidance for tools and modes whose controls are not visible. */
+function hintFor(tool: Tool, mode: EditorMode | null): string | null {
+  if (mode === "pen") {
+    return `Click the first point to close · Enter or Esc to finish · ${MOD}+Z removes the last point`;
+  }
+  if (mode === "path") {
+    return "Drag points and handles · Click a segment to add a point · Double-click a point for corner/curve · Enter to finish";
+  }
+  switch (tool) {
+    case "pen":
+      return "Click to add a point · Drag to pull out a curve";
+    case "rect":
+    case "ellipse":
+      return "Drag to draw · Shift for equal sides · Alt from the centre";
+    default:
+      return null;
+  }
+}
+
 /**
  * v0.1 shell. Every handler sends a command into the core and re-reads what
  * came back; nothing here mirrors document state. Selection lives in the core
@@ -43,6 +62,7 @@ export function App() {
   const core = editor.current;
   const layerCount = core ? core.layers().length : 0;
   const selectionCount = core?.selectionCount ?? 0;
+  const mode = core?.mode ?? null;
   const nextFill = () => SWATCHES[layerCount % SWATCHES.length];
 
   const undo = () => run((editor) => editor.undo());
@@ -66,12 +86,35 @@ export function App() {
       setNotice("Loaded saved project");
     });
 
-  /** Escape backs out one level: the drag, then the shape tool, then the selection. */
+  /** Switching tools finishes a pen path or path edit in progress. */
+  const changeTool = (next: Tool) => {
+    run((editor) => editor.finishMode());
+    setTool(next);
+  };
+
+  /**
+   * Escape backs out one level: the drag, then the pen path or path edit
+   * (kept, not discarded), then the tool, then the selection.
+   */
   const escape = () =>
     run((editor) => {
       if (editor.cancelGesture()) return;
+      if (editor.finishMode()) {
+        if (tool === "pen") setTool("select");
+        return;
+      }
       if (tool !== "select") setTool("select");
       else editor.clearSelection();
+    });
+
+  /** Enter finishes the pen path or path edit, or starts editing the selected path. */
+  const enter = () =>
+    run((editor) => {
+      if (editor.finishMode()) {
+        if (tool === "pen") setTool("select");
+      } else if (tool === "select") {
+        editor.beginPathEdit();
+      }
     });
 
   const nudge = (dx: number, dy: number) => run((editor) => editor.nudge(dx, dy));
@@ -88,10 +131,12 @@ export function App() {
   ]);
 
   useShortcuts([
-    { key: "v", run: () => setTool("select") },
-    { key: "r", run: () => setTool("rect") },
-    { key: "o", run: () => setTool("ellipse") },
+    { key: "v", run: () => changeTool("select") },
+    { key: "r", run: () => changeTool("rect") },
+    { key: "o", run: () => changeTool("ellipse") },
+    { key: "p", run: () => changeTool("pen") },
     { key: "escape", run: escape },
+    { key: "enter", run: enter },
     { key: "delete", run: () => run((editor) => editor.deleteSelection()) },
     { key: "backspace", run: () => run((editor) => editor.deleteSelection()) },
     { key: "a", mod: true, run: () => run((editor) => editor.selectAll()) },
@@ -130,7 +175,7 @@ export function App() {
             />
             <ToolDock
               tool={tool}
-              onToolChange={setTool}
+              onToolChange={changeTool}
               onUndo={undo}
               onRedo={redo}
               canUndo={core?.canUndo ?? false}
@@ -149,6 +194,7 @@ export function App() {
           height={HEIGHT}
           layerCount={layerCount}
           selectionCount={selectionCount}
+          hint={hintFor(tool, mode)}
           notice={notice}
         />
       </div>

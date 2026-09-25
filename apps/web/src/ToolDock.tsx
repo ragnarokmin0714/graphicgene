@@ -1,11 +1,11 @@
-import { Circle, MousePointer2, Redo2, Square, Undo2 } from "lucide-react";
+import { Circle, MousePointer2, PenTool, Redo2, Square, Undo2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import type { ShapeKind } from "@/editor";
 import { IconButton } from "@/IconButton";
 import { MOD, SHIFT } from "@/shortcuts";
 
 /** The active canvas tool. View state: which mode the pointer is in. */
-export type Tool = "select" | ShapeKind;
+export type Tool = "select" | ShapeKind | "pen";
 
 type Props = {
   tool: Tool;
@@ -20,6 +20,7 @@ const TOOLS: { tool: Tool; label: string; icon: React.ReactNode; key: string }[]
   { tool: "select", label: "Select", icon: <MousePointer2 />, key: "V" },
   { tool: "rect", label: "Rectangle", icon: <Square />, key: "R" },
   { tool: "ellipse", label: "Ellipse", icon: <Circle />, key: "O" },
+  { tool: "pen", label: "Pen", icon: <PenTool />, key: "P" },
 ];
 
 /**

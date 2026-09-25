@@ -6,12 +6,16 @@
  * screen measurements, which is why this part lives in the UI rather than in
  * the core: at 200% zoom a handle is still 8 screen pixels.
  */
+import { ROTATE_CURSOR } from "@/cursors";
 import type { Frame, Point } from "@/editor";
 
 /** Drawn handle size, in px. */
 export const HANDLE_SIZE = 8;
-/** How close to a handle's centre counts as grabbing it. */
-const GRAB_RADIUS = 6;
+/**
+ * How close counts as grabbing something — a frame handle, a pen anchor, a
+ * path point — in screen px. Divide by the zoom to get document units.
+ */
+export const PICK_RADIUS = 6;
 /** How far outside a corner the rotate zone reaches. */
 const ROTATE_RADIUS = 18;
 /** Edges shorter than this drop their midpoint handles so corners stay grabbable. */
@@ -45,7 +49,7 @@ export function handlesOf(frame: Frame): Handle[] {
 export function handleAt(frame: Frame, p: Point): HandleTarget | null {
   const center = pointAt(frame, 0.5, 0.5);
   for (const handle of handlesOf(frame)) {
-    if (distance(handle.at, p) <= GRAB_RADIUS) {
+    if (distance(handle.at, p) <= PICK_RADIUS) {
       return { kind: "scale", u: handle.u, v: handle.v, cursor: resizeCursor(center, handle.at) };
     }
   }
@@ -83,11 +87,3 @@ function inside(frame: Frame, p: Point): boolean {
 function distance(a: Point, b: Point): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
-
-/** A curved double arrow, outlined in white so it reads on any artwork. */
-const ROTATE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">` +
-    `<g stroke="white" stroke-width="4"><path d="M6 15a7 7 0 0 1 12 0"/><path d="M4 11l2 4 4-1"/><path d="M20 11l-2 4-4-1"/></g>` +
-    `<g stroke="black" stroke-width="1.6"><path d="M6 15a7 7 0 0 1 12 0"/><path d="M4 11l2 4 4-1"/><path d="M20 11l-2 4-4-1"/></g>` +
-    `</svg>`,
-)}") 12 12, crosshair`;

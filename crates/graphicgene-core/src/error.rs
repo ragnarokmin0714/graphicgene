@@ -11,6 +11,9 @@ pub enum CoreError {
         child: crate::node::NodeId,
     },
 
+    #[error("node {0:?} is not a vector path")]
+    NotAVector(crate::node::NodeId),
+
     #[error("child index {index} is out of range (parent holds {len})")]
     BadChildIndex { index: usize, len: usize },
 

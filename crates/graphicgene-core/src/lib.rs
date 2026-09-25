@@ -8,6 +8,7 @@
 //! 2. **No browser or OS APIs.** Platform differences go behind traits that the
 //!    app layer implements.
 
+pub mod anchors;
 pub mod color;
 pub mod command;
 pub mod doc;
@@ -17,6 +18,8 @@ pub mod gesture;
 pub mod hit;
 pub mod layout;
 pub mod node;
+pub mod path_edit;
+pub mod pen;
 pub mod project;
 pub mod selection;
 

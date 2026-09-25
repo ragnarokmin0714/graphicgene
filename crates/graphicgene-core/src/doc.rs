@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use slotmap::SlotMap;
 
 use crate::error::{CoreError, Result};
-use crate::geom::{Affine, Bounds, empty_bounds, union};
-use crate::node::{Node, NodeId};
+use crate::geom::{Affine, BezPath, Bounds, empty_bounds, union};
+use crate::node::{Node, NodeId, NodeKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
@@ -105,6 +105,29 @@ impl Document {
         children.remove(index);
         self.nodes[id].common.parent = None;
         Ok((parent, index))
+    }
+
+    /// The path of a vector node.
+    pub fn vector_path(&self, id: NodeId) -> Result<&BezPath> {
+        match &self.get(id)?.kind {
+            NodeKind::Vector(vector) => Ok(&vector.path),
+            _ => Err(CoreError::NotAVector(id)),
+        }
+    }
+
+    /// Replace a vector node's path without going through the journal.
+    ///
+    /// Only for previews during a gesture, which then commit the final path
+    /// as a `Command::SetPath` (or restore the original on cancel). Anything
+    /// else must use the command, or undo loses track.
+    pub(crate) fn write_path(&mut self, id: NodeId, path: BezPath) -> Result<()> {
+        match &mut self.get_mut(id)?.kind {
+            NodeKind::Vector(vector) => {
+                vector.path = path;
+                Ok(())
+            }
+            _ => Err(CoreError::NotAVector(id)),
+        }
     }
 
     /// Whether `id` is reachable from the root. Undo detaches rather than
