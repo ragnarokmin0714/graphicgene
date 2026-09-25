@@ -74,11 +74,11 @@ assert.deepEqual(pixel(canvas.render(), 20, 20), [255, 0, 0, 255], "drawn rect s
 assert.equal(canvas.selectionCount(), 1, "a drawn shape becomes the selection");
 assert.equal(JSON.parse(canvas.layerTree())[0].selected, true, "layer rows report selection");
 
-assert.equal(canvas.selectAt(60, 60, false), "miss", "empty space selects nothing");
+assert.equal(canvas.selectAt(60, 60, false, 4), "miss", "empty space selects nothing");
 assert.equal(canvas.selectionCount(), 0, "clicking empty space clears the selection");
 assert.equal(JSON.parse(canvas.overlay()).frame, null, "no selection, no frame");
 
-assert.equal(canvas.selectAt(20, 20, false), "drag", "clicking the rect selects it");
+assert.equal(canvas.selectAt(20, 20, false, 4), "drag", "clicking the rect selects it");
 assert.equal(canvas.beginMove(20, 20), true);
 for (let step = 1; step <= 20; step++) canvas.updateGesture(20 + step, 20 + step, false, false);
 assert.equal(JSON.parse(canvas.overlay()).gesture, "move");
@@ -93,7 +93,7 @@ canvas.undo();
 assert.deepEqual(pixel(canvas.render(), 15, 15), [255, 0, 0, 255], "one undo reverts the whole drag");
 canvas.redo();
 
-assert.equal(canvas.selectAt(45, 45, true), "hit", "shift-click on a selected node deselects it");
+assert.equal(canvas.selectAt(45, 45, true, 4), "hit", "shift-click on a selected node deselects it");
 assert.equal(canvas.selectionCount(), 0);
 
 canvas.selectAll();

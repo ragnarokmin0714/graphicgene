@@ -70,6 +70,10 @@ pub struct PathEdit {
     id: NodeId,
     selected: Vec<AnchorId>,
     drag: Option<Drag>,
+    /// Anchors per subpath, as of the last change this editor knows about.
+    /// Anchor ids are positions, so they only keep pointing at the same
+    /// anchors while this layout holds; see `revalidate`.
+    layout: Vec<usize>,
 }
 
 impl PathEdit {
@@ -82,6 +86,7 @@ impl PathEdit {
             id,
             selected: Vec::new(),
             drag: None,
+            layout: layout_of(&AnchorPath::from_bez(doc.vector_path(id)?)),
         }))
     }
 
@@ -134,6 +139,7 @@ impl PathEdit {
                 let inserted = anchors.split_segment(from, t);
                 doc.write_path(self.id, anchors.to_bez())?;
                 self.selected = vec![inserted];
+                self.layout = layout_of(&anchors);
                 (PressOutcome::Segment, Some(DragKind::Anchors))
             }
             None => {
@@ -233,8 +239,10 @@ impl PathEdit {
     /// Abandon the drag, restoring the path as it was at the press.
     pub fn cancel_drag(&mut self, doc: &mut Document) -> Result<()> {
         if let Some(drag) = self.drag.take() {
+            // Cancelling a drag that inserted an anchor takes the anchor back
+            // out, which shifts the ids after it.
+            self.sync_layout(&AnchorPath::from_bez(&drag.original));
             doc.write_path(self.id, drag.original)?;
-            self.selected.retain(|id| drag.anchors.get(*id).is_some());
         }
         Ok(())
     }
@@ -250,6 +258,7 @@ impl PathEdit {
         let mut anchors = AnchorPath::from_bez(doc.vector_path(self.id)?);
         anchors.remove(&self.selected);
         self.selected.clear();
+        self.layout = layout_of(&anchors);
         if anchors.is_empty() {
             return Ok(DeleteOutcome::EmptiedPath);
         }
@@ -320,13 +329,21 @@ impl PathEdit {
         Ok(true)
     }
 
-    /// After undo or redo changed the path under us: forget selected anchors
-    /// that no longer exist.
+    /// After undo or redo may have changed the path under us. If anchors were
+    /// added or removed, the selected ids now point at other anchors, so the
+    /// selection is dropped; if they only moved, it is kept.
     pub fn revalidate(&mut self, doc: &Document) -> Result<()> {
-        let anchors = AnchorPath::from_bez(doc.vector_path(self.id)?);
-        self.selected.retain(|id| anchors.get(*id).is_some());
         self.drag = None;
+        self.sync_layout(&AnchorPath::from_bez(doc.vector_path(self.id)?));
         Ok(())
+    }
+
+    fn sync_layout(&mut self, anchors: &AnchorPath) {
+        let layout = layout_of(anchors);
+        if layout != self.layout {
+            self.selected.clear();
+            self.layout = layout;
+        }
     }
 
     pub fn view(&self, doc: &Document) -> Result<EditView> {
@@ -359,6 +376,14 @@ impl PathEdit {
         let scale = world.determinant().abs().sqrt().max(1e-9);
         Ok((world.inverse(), scale))
     }
+}
+
+fn layout_of(anchors: &AnchorPath) -> Vec<usize> {
+    anchors
+        .subpaths
+        .iter()
+        .map(|sub| sub.anchors.len())
+        .collect()
 }
 
 fn toggle(ids: &mut Vec<AnchorId>, id: AnchorId) {

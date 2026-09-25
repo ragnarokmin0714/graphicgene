@@ -22,6 +22,7 @@ pub mod path_edit;
 pub mod pen;
 pub mod project;
 pub mod selection;
+pub mod session;
 pub mod svg;
 
 pub use color::LinearRgba;
@@ -31,3 +32,4 @@ pub use error::{CoreError, Result};
 pub use gesture::{Frame, Gesture, Modifiers, ShapeKind, TransformKind};
 pub use node::{BlendMode, Node, NodeId, NodeKind};
 pub use selection::Selection;
+pub use session::Session;

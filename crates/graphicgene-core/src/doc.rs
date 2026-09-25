@@ -3,6 +3,13 @@
 //! Nodes live in a `SlotMap` rather than an `Rc<RefCell<..>>` tree. Arena
 //! storage is cache-friendly, serializable, and gives the stable identity that
 //! components and any future collaboration model both depend on.
+//!
+//! The document also keeps a log of what changed since it was last asked
+//! (`take_changes`). Every mutation goes through `get_mut`, `attach` or
+//! `detach`, so recording there cannot be bypassed — which is what lets the
+//! renderer redraw only what moved instead of trusting callers to report it.
+
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use slotmap::SlotMap;
@@ -15,6 +22,38 @@ use crate::node::{Node, NodeId, NodeKind};
 pub struct Document {
     nodes: SlotMap<NodeId, Node>,
     root: NodeId,
+    /// Not saved: a document fresh from a file has changed "everything".
+    #[serde(skip, default = "Changes::everything")]
+    changes: Changes,
+    /// Bumped on every attach and detach. Not saved.
+    #[serde(skip)]
+    structure_version: u64,
+}
+
+/// What changed in a document since the last `take_changes`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Changes {
+    /// Nodes whose own fields may have changed — transform, path, paint,
+    /// visibility and so on. Recorded conservatively: asking for a node
+    /// mutably counts, whether or not anything was then written.
+    pub nodes: BTreeSet<NodeId>,
+    /// The tree's shape changed: a node was attached or detached.
+    pub structure: bool,
+    /// Treat everything as changed: a new document, or one just loaded.
+    pub everything: bool,
+}
+
+impl Changes {
+    pub fn everything() -> Self {
+        Self {
+            everything: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.everything && !self.structure && self.nodes.is_empty()
+    }
 }
 
 impl Default for Document {
@@ -27,7 +66,12 @@ impl Document {
     pub fn new() -> Self {
         let mut nodes = SlotMap::with_key();
         let root = nodes.insert(Node::group("Root"));
-        Self { nodes, root }
+        Self {
+            nodes,
+            root,
+            changes: Changes::everything(),
+            structure_version: 0,
+        }
     }
 
     pub fn root(&self) -> NodeId {
@@ -38,8 +82,28 @@ impl Document {
         self.nodes.get(id).ok_or(CoreError::MissingNode(id))
     }
 
+    /// Mutable access to a node. Records the node as changed.
     pub fn get_mut(&mut self, id: NodeId) -> Result<&mut Node> {
-        self.nodes.get_mut(id).ok_or(CoreError::MissingNode(id))
+        let node = self.nodes.get_mut(id).ok_or(CoreError::MissingNode(id))?;
+        self.changes.nodes.insert(id);
+        Ok(node)
+    }
+
+    /// Everything that changed since the last call, leaving the log empty.
+    pub fn take_changes(&mut self) -> Changes {
+        std::mem::take(&mut self.changes)
+    }
+
+    /// Counts attaches and detaches since the document was created or
+    /// loaded: anything showing the tree's shape can cache on it.
+    pub fn structure_version(&self) -> u64 {
+        self.structure_version
+    }
+
+    fn structure_changed(&mut self, id: NodeId) {
+        self.changes.structure = true;
+        self.changes.nodes.insert(id);
+        self.structure_version += 1;
     }
 
     pub fn contains(&self, id: NodeId) -> bool {
@@ -81,6 +145,7 @@ impl Document {
         }
         children.insert(index, id);
         self.nodes[id].common.parent = Some(parent);
+        self.structure_changed(id);
         Ok(())
     }
 
@@ -104,6 +169,7 @@ impl Document {
             .ok_or(CoreError::MissingNode(id))?;
         children.remove(index);
         self.nodes[id].common.parent = None;
+        self.structure_changed(id);
         Ok((parent, index))
     }
 

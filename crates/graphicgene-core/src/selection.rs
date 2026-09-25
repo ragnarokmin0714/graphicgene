@@ -8,10 +8,20 @@ use crate::doc::Document;
 use crate::node::NodeId;
 
 /// An ordered set of node ids, in the order they were selected.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct Selection {
     ids: Vec<NodeId>,
+    /// Bumped on every change, never reset: views can cache on it.
+    version: u64,
 }
+
+impl PartialEq for Selection {
+    fn eq(&self, other: &Self) -> bool {
+        self.ids == other.ids
+    }
+}
+
+impl Eq for Selection {}
 
 impl Selection {
     pub fn new() -> Self {
@@ -34,21 +44,36 @@ impl Selection {
         self.ids.len()
     }
 
+    /// Grows whenever the selection changes.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
     pub fn clear(&mut self) {
-        self.ids.clear();
+        if !self.ids.is_empty() {
+            self.ids.clear();
+            self.version += 1;
+        }
     }
 
     /// Replace the selection. Duplicates are dropped, first occurrence wins.
     pub fn set(&mut self, ids: impl IntoIterator<Item = NodeId>) {
-        self.ids.clear();
+        let mut next: Vec<NodeId> = Vec::new();
         for id in ids {
-            self.add(id);
+            if !next.contains(&id) {
+                next.push(id);
+            }
+        }
+        if next != self.ids {
+            self.ids = next;
+            self.version += 1;
         }
     }
 
     pub fn add(&mut self, id: NodeId) {
         if !self.contains(id) {
             self.ids.push(id);
+            self.version += 1;
         }
     }
 
@@ -59,6 +84,7 @@ impl Selection {
             }
             None => self.ids.push(id),
         }
+        self.version += 1;
     }
 
     /// Apply a click that landed on `hit` (or on nothing).
@@ -90,7 +116,11 @@ impl Selection {
     /// Drop ids that are no longer in the tree — after undoing an insert, a
     /// delete, or loading a different document.
     pub fn retain_attached(&mut self, doc: &Document) {
+        let before = self.ids.len();
         self.ids
             .retain(|&id| doc.contains(id) && doc.is_attached(id));
+        if self.ids.len() != before {
+            self.version += 1;
+        }
     }
 }

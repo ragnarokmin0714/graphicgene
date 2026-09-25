@@ -138,8 +138,9 @@ export class EditorHandle {
 
   // Selection. Lives in the core because it drives transforms; see lib.rs.
 
-  selectAt(x: number, y: number, additive: boolean): PressOutcome {
-    return this.inner.selectAt(x, y, additive) as PressOutcome;
+  /** `tolerance`: how far outside a shape still hits it, in document units. */
+  selectAt(x: number, y: number, additive: boolean, tolerance: number): PressOutcome {
+    return this.inner.selectAt(x, y, additive, tolerance) as PressOutcome;
   }
 
   selectLayer(id: string, additive: boolean): void {
@@ -159,8 +160,8 @@ export class EditorHandle {
   }
 
   /** Track the node under the pointer; true if that changed. */
-  hover(x: number, y: number): boolean {
-    return this.inner.hover(x, y);
+  hover(x: number, y: number, tolerance: number): boolean {
+    return this.inner.hover(x, y, tolerance);
   }
 
   clearHover(): boolean {
@@ -280,6 +281,11 @@ export class EditorHandle {
 
   layers(): LayerRow[] {
     return JSON.parse(this.inner.layerTree()) as LayerRow[];
+  }
+
+  /** Changes whenever `layers()` may have: cache the rows on it. */
+  get layersVersion(): string {
+    return this.inner.layersVersion();
   }
 
   /**

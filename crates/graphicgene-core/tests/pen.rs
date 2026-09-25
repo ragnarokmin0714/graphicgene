@@ -509,3 +509,17 @@ fn cancelling_an_edit_drag_restores_the_path() {
     edit.cancel_drag(&mut doc).unwrap();
     assert_eq!(doc.vector_path(node).unwrap(), &before);
 }
+
+#[test]
+fn cancelling_a_segment_insert_drops_the_now_meaningless_selection() {
+    let mut doc = Document::new();
+    let mut journal = Journal::new();
+    let (_, mut edit) = edit_square(&mut doc, &mut journal);
+    edit.press(&mut doc, Point::new(20.0, 0.5), 4.0, false)
+        .unwrap();
+    assert_eq!(edit.selected(), [id(0, 1)], "the inserted anchor");
+    edit.cancel_drag(&mut doc).unwrap();
+    // Id (0, 1) would now be the square's second corner, which the user
+    // never picked.
+    assert!(edit.selected().is_empty());
+}

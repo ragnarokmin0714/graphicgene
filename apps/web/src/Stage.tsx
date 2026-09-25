@@ -11,7 +11,7 @@ import type {
   Point,
   Rgba,
 } from "@/editor";
-import { HANDLE_SIZE, PICK_RADIUS, handleAt, handlesOf } from "@/handles";
+import { HANDLE_SIZE, HIT_RADIUS, PICK_RADIUS, handleAt, handlesOf } from "@/handles";
 import type { Tool } from "@/ToolDock";
 
 type Props = {
@@ -32,8 +32,9 @@ type PointerState = { at: Point; shift: boolean; alt: boolean };
 /** Which core API a press started talking to; its moves and release follow. */
 type DragKind = "pen" | "path" | "gesture";
 
-/** Pick distance in document units. Zoom is fixed at 100% in v0.1. */
+/** Pick distances in document units. Zoom is fixed at 100% in v0.1. */
 const PICK = PICK_RADIUS;
+const HIT = HIT_RADIUS;
 
 /**
  * The artboard: the rendered pixmap, the overlay on top, and the pointer
@@ -144,7 +145,7 @@ export function Stage({ editor, revision, run, width, height, tool, nextFill, on
       } else if (target?.kind === "rotate") {
         ed.beginRotate(p[0], p[1]);
       } else {
-        const outcome = ed.selectAt(p[0], p[1], shift);
+        const outcome = ed.selectAt(p[0], p[1], shift, HIT);
         if (outcome === "drag") ed.beginMove(p[0], p[1]);
         else if (outcome === "miss") ed.beginMarquee(p[0], p[1], shift);
       }
@@ -164,7 +165,7 @@ export function Stage({ editor, revision, run, width, height, tool, nextFill, on
     if (!core) return;
     if (tool === "pen") {
       if (core.penHover(p[0], p[1], PICK)) setHoverTick((t) => t + 1);
-    } else if (tool === "select" && mode === null && core.hover(p[0], p[1])) {
+    } else if (tool === "select" && mode === null && core.hover(p[0], p[1], HIT)) {
       setHoverTick((t) => t + 1);
     }
     setCursor(cursorAt(p));

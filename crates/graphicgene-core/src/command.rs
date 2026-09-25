@@ -206,6 +206,9 @@ impl Command {
 pub struct Journal {
     undo: Vec<Command>,
     redo: Vec<Command>,
+    /// Commands applied so far, counting undos and redos. Never reset, so it
+    /// only ever grows: views can cache on it.
+    ops: u64,
 }
 
 impl Journal {
@@ -217,6 +220,7 @@ impl Journal {
         let inverse = command.apply(doc)?;
         self.undo.push(inverse);
         self.redo.clear();
+        self.ops += 1;
         Ok(())
     }
 
@@ -226,6 +230,7 @@ impl Journal {
         };
         let inverse = command.apply(doc)?;
         self.redo.push(inverse);
+        self.ops += 1;
         Ok(true)
     }
 
@@ -235,6 +240,7 @@ impl Journal {
         };
         let inverse = command.apply(doc)?;
         self.undo.push(inverse);
+        self.ops += 1;
         Ok(true)
     }
 
@@ -246,6 +252,12 @@ impl Journal {
         !self.redo.is_empty()
     }
 
+    /// Commands applied so far, including undos and redos.
+    pub fn ops(&self) -> u64 {
+        self.ops
+    }
+
+    /// Forget the history. `ops` keeps counting.
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();

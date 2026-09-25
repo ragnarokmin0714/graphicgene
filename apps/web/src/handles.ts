@@ -16,6 +16,8 @@ export const HANDLE_SIZE = 8;
  * path point — in screen px. Divide by the zoom to get document units.
  */
 export const PICK_RADIUS = 6;
+/** How far outside a shape's edge still counts as hitting it, in screen px. */
+export const HIT_RADIUS = 4;
 /** How far outside a corner the rotate zone reaches. */
 const ROTATE_RADIUS = 18;
 /** Edges shorter than this drop their midpoint handles so corners stay grabbable. */
