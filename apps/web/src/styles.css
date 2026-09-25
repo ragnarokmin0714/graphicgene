@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 /*
  * Design-tool density, set on day one.
@@ -14,6 +15,9 @@
 
   --spacing-row: 1.75rem; /* 28px — standard list/panel row */
   --spacing-panel: 15rem; /* 240px — side panel width */
+  --spacing-bar: 2.5rem; /* 40px — header and panel title bars */
+  --spacing-status: 1.5rem; /* 24px — status bar */
+  --spacing-tool: 2rem; /* 32px — floating tool dock buttons */
 
   --text-ui: 0.75rem; /* 12px — panel and menu body */
   --text-ui--line-height: 1rem;
@@ -23,56 +27,70 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * Chrome colours carry a faint cool tint (hue 275) so the UI reads as
+ * designed rather than as default grey; the accent is an indigo-violet that
+ * matches the logo. The canvas tokens stay at chroma 0 — see below.
+ */
 :root {
+  color-scheme: light;
   --radius: var(--radius-gg);
 
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.21 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0 0);
-  --primary: oklch(0.55 0.18 264);
+  --background: oklch(0.972 0.003 275);
+  --foreground: oklch(0.22 0.012 275);
+  --card: oklch(0.993 0.001 275);
+  --card-foreground: oklch(0.22 0.012 275);
+  --popover: oklch(0.995 0.001 275);
+  --popover-foreground: oklch(0.22 0.012 275);
+  --primary: oklch(0.56 0.2 278);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.955 0 0);
-  --secondary-foreground: oklch(0.21 0 0);
-  --muted: oklch(0.955 0 0);
-  --muted-foreground: oklch(0.52 0 0);
-  --accent: oklch(0.94 0 0);
-  --accent-foreground: oklch(0.21 0 0);
+  --secondary: oklch(0.955 0.004 275);
+  --secondary-foreground: oklch(0.22 0.012 275);
+  --muted: oklch(0.952 0.005 275);
+  --muted-foreground: oklch(0.52 0.014 275);
+  --accent: oklch(0.945 0.006 275);
+  --accent-foreground: oklch(0.22 0.012 275);
   --destructive: oklch(0.58 0.22 27);
   --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.9 0 0);
-  --input: oklch(0.9 0 0);
-  --ring: oklch(0.55 0.18 264);
+  --border: oklch(0.912 0.005 275);
+  --input: oklch(0.9 0.005 275);
+  --ring: oklch(0.56 0.2 278);
+
+  --float-shadow: 0 1px 2px rgb(20 20 40 / 0.06), 0 8px 24px -6px rgb(20 20 40 / 0.14);
 
   /* The canvas surround is deliberately not --background: artwork must be
      judged against a neutral field, not against the UI's own tint. */
-  --canvas-backdrop: oklch(0.93 0 0);
+  --canvas-backdrop: oklch(0.94 0 0);
+  --canvas-dot: oklch(0.82 0 0);
 }
 
 .dark {
-  --background: oklch(0.205 0 0);
-  --foreground: oklch(0.95 0 0);
-  --card: oklch(0.24 0 0);
-  --card-foreground: oklch(0.95 0 0);
-  --popover: oklch(0.24 0 0);
-  --popover-foreground: oklch(0.95 0 0);
-  --primary: oklch(0.65 0.17 264);
-  --primary-foreground: oklch(0.18 0 0);
-  --secondary: oklch(0.27 0 0);
-  --secondary-foreground: oklch(0.95 0 0);
-  --muted: oklch(0.27 0 0);
-  --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.3 0 0);
-  --accent-foreground: oklch(0.95 0 0);
-  --destructive: oklch(0.62 0.2 27);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.31 0 0);
-  --input: oklch(0.31 0 0);
-  --ring: oklch(0.65 0.17 264);
+  color-scheme: dark;
 
-  --canvas-backdrop: oklch(0.16 0 0);
+  --background: oklch(0.175 0.006 275);
+  --foreground: oklch(0.94 0.004 275);
+  --card: oklch(0.205 0.007 275);
+  --card-foreground: oklch(0.94 0.004 275);
+  --popover: oklch(0.23 0.008 275);
+  --popover-foreground: oklch(0.94 0.004 275);
+  --primary: oklch(0.66 0.18 278);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.26 0.008 275);
+  --secondary-foreground: oklch(0.94 0.004 275);
+  --muted: oklch(0.26 0.008 275);
+  --muted-foreground: oklch(0.67 0.012 275);
+  --accent: oklch(0.27 0.009 275);
+  --accent-foreground: oklch(0.96 0.004 275);
+  --destructive: oklch(0.64 0.2 27);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 0.08);
+  --input: oklch(1 0 0 / 0.12);
+  --ring: oklch(0.66 0.18 278);
+
+  --float-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -8px rgb(0 0 0 / 0.6);
+
+  --canvas-backdrop: oklch(0.135 0 0);
+  --canvas-dot: oklch(0.26 0 0);
 }
 
 @theme inline {
@@ -97,9 +115,22 @@
   --color-ring: var(--ring);
   --color-canvas-backdrop: var(--canvas-backdrop);
 
+  --shadow-float: var(--float-shadow);
+
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
+}
+
+/*
+ * Decorative dot grid behind the artboard. It is chrome, not geometry: once
+ * zoom and pan exist the grid must follow the viewport transform from the
+ * core, and this becomes an inline style like the other computed visuals.
+ */
+@utility bg-dot-grid {
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-position: -8px -8px;
 }
 
 @layer base {
@@ -116,7 +147,12 @@
   body {
     @apply bg-background text-foreground text-ui antialiased;
     margin: 0;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* Inter is bundled so chrome looks the same on every OS; CJK falls
+       through to the platform's own Traditional Chinese face. */
+    font-family:
+      "Inter Variable", system-ui, -apple-system, "Segoe UI", "PingFang TC",
+      "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+    font-feature-settings: "cv11", "ss03";
     /* A design tool's chrome should never be selected by a stray drag. */
     user-select: none;
   }

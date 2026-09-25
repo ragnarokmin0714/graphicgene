@@ -51,4 +51,15 @@ assert.ok(
 );
 assert.deepEqual(pixel(reloaded.render(), 35, 35), [255, 0, 0, 255], "reload should redraw");
 
+// The layer panel reads rows in display order: no root row, topmost first.
+const top = reloaded.addEllipse(50, 50, 4, 4, RED);
+assert.deepEqual(
+  JSON.parse(reloaded.layerTree()).map((row) => [row.id, row.depth]),
+  [
+    [top, 0],
+    [id, 0],
+  ],
+  "layer rows should list the topmost node first and omit the root",
+);
+
 console.log("smoke: ok");

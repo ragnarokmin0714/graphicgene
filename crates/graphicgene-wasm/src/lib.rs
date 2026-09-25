@@ -165,14 +165,31 @@ impl Editor {
     }
 
     /// The layer tree, as JSON, for the UI to render.
+    ///
+    /// Rows come in layer-panel order, not paint order: the root is omitted
+    /// and the topmost sibling comes first, with each group directly above its
+    /// own children. `depth` is 0 for the root's children.
     #[wasm_bindgen(js_name = layerTree)]
     pub fn layer_tree(&self) -> Result<String, JsError> {
-        let ids = self.document.walk();
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
+        let root = self.document.root();
+        let mut out = Vec::new();
+        // Children are stored bottom-to-top, so pushing them in stored order
+        // pops the topmost one first.
+        let mut stack: Vec<(NodeId, u32)> = self
+            .document
+            .children_of(root)
+            .map_err(to_js)?
+            .iter()
+            .map(|&id| (id, 0))
+            .collect();
+        while let Some((id, depth)) = stack.pop() {
             let node = self.document.get(id).map_err(to_js)?;
+            if let Some(children) = node.children() {
+                stack.extend(children.iter().map(|&child| (child, depth + 1)));
+            }
             out.push(serde_json::json!({
                 "id": encode_id(id),
+                "depth": depth,
                 "name": node.common.name,
                 "visible": node.common.visible,
                 "locked": node.common.locked,

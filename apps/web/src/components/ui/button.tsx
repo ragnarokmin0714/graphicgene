@@ -28,12 +28,18 @@ const buttonVariants = cva(
         "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8",
         "icon-lg": "size-10",
+        // graphicgene: floating tool dock buttons, sized by the --spacing-tool token.
+        tool: "size-tool rounded-lg [&_svg:not([class*='size-'])]:size-4",
       },
     },
     // Density note (graphicgene): shadcn ships `default` at h-9 (36px), which
     // is dashboard scale. Editor chrome is Figma scale, so `xs` (24px) is the
     // default here. Changing it once, in the vendored source, is why every
     // panel written later gets the right density without anyone remembering.
+    //
+    // The Button signature must NOT default `variant`/`size` (upstream shadcn
+    // does): a default there overrides these, and every toolbar button came
+    // out as a solid primary block.
     defaultVariants: {
       variant: "ghost",
       size: "xs",
@@ -43,8 +49,8 @@ const buttonVariants = cva(
 
 function Button({
   className,
-  variant = "default",
-  size = "default",
+  variant,
+  size,
   asChild = false,
   ...props
 }: React.ComponentProps<"button"> &
@@ -56,8 +62,8 @@ function Button({
   return (
     <Comp
       data-slot="button"
-      data-variant={variant}
-      data-size={size}
+      data-variant={variant ?? "ghost"}
+      data-size={size ?? "xs"}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />

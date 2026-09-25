@@ -35,13 +35,22 @@ export function Canvas({ editor, revision, width, height }: Props) {
   }, [editor, revision, width, height]);
 
   return (
-    <div className="bg-canvas-backdrop flex flex-1 items-center justify-center overflow-auto p-4">
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="rounded-sm bg-white shadow-md"
-      />
+    // Bottom padding leaves room for the floating tool dock.
+    <div className="absolute inset-0 flex overflow-auto p-10 pb-20">
+      <figure className="m-auto flex flex-col gap-1.5">
+        <figcaption className="text-label text-muted-foreground flex justify-between px-px">
+          <span className="font-medium">Artboard</span>
+          <span className="tabular-nums">
+            {width} × {height}
+          </span>
+        </figcaption>
+        <canvas
+          ref={canvasRef}
+          width={width}
+          height={height}
+          className="shadow-float block bg-white ring-1 ring-black/5"
+        />
+      </figure>
     </div>
   );
 }

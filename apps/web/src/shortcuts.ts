@@ -1,0 +1,53 @@
+import { useEffect, useLayoutEffect, useRef } from "react";
+
+const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
+
+/** Modifier labels as the user's platform prints them. */
+export const MOD = isMac ? "⌘" : "Ctrl";
+export const SHIFT = isMac ? "⇧" : "Shift";
+
+export type Shortcut = {
+  /** `KeyboardEvent.key`, lower-cased. */
+  key: string;
+  mod?: boolean;
+  shift?: boolean;
+  run: () => void;
+};
+
+/**
+ * Window-level keyboard shortcuts.
+ *
+ * Ignored while focus is in a text field, so the future text tool and property
+ * inputs can take the same keys. Auto-repeat only fires modified shortcuts:
+ * holding Ctrl+Z steps back through history, holding R must not stamp out a
+ * rectangle per repeat.
+ */
+export function useShortcuts(shortcuts: readonly Shortcut[]) {
+  const latest = useRef(shortcuts);
+  useLayoutEffect(() => {
+    latest.current = shortcuts;
+  });
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("input, textarea, select, [contenteditable]")
+      ) {
+        return;
+      }
+      const mod = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      const hit = latest.current.find(
+        (s) =>
+          s.key === key && !!s.mod === mod && !!s.shift === event.shiftKey && !event.altKey,
+      );
+      if (!hit) return;
+      event.preventDefault();
+      if (event.repeat && !hit.mod) return;
+      hit.run();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+}

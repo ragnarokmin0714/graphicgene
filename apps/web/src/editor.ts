@@ -14,6 +14,8 @@ import init, { Editor } from "./wasm/graphicgene_wasm.js";
 
 export type LayerRow = {
   id: string;
+  /** 0 for top-level layers. Rows arrive in panel order: topmost first. */
+  depth: number;
   name: string;
   kind: "group" | "vector";
   visible: boolean;

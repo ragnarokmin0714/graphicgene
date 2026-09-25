@@ -16,9 +16,12 @@ build, and `apps/web/scripts/smoke.mjs` — which drives the real wasm module
 through draw / transform / undo / redo / save / reload and asserts on rendered
 pixels. These four are the bar for any change.
 
-**Not verified:** nothing has been opened in a browser. This box has no browser
-engine, so the React layer, canvas blitting and the dev server are untested
-against a real runtime. Do that before treating the web shell as working.
+**Browser-checked 2026-09-25** by Roger on the deployed Pages build: shapes
+appear, undo/redo and their disabled states are right, save -> reload -> load
+restores the document, edges are crisp, and the console is clean apart from a
+missing favicon (since fixed). This box has no browser engine, so anything
+changed after that date is verified headlessly only until he looks again — in
+particular the theme switch and the redesigned chrome.
 
 ## Commands
 
@@ -150,6 +153,12 @@ Two rules keep it from spreading where it does not belong:
   transforms: those numbers come from the core, not from a design token. The
   canvas element's own `width`/`height` are device pixels for the same reason.
 
+Theme is a per-viewer preference, not document state: `useTheme.ts` keeps it
+in React and localStorage, and an inline script in `index.html` applies it
+before first paint. Keep the two in sync. Keyboard shortcuts go through
+`useShortcuts` in `shortcuts.ts`, which already skips text fields — do not add
+ad-hoc `keydown` listeners.
+
 `--canvas-backdrop` is deliberately not `--background`: artwork has to be judged
 against a neutral field, not against the UI's tint.
 
@@ -234,8 +243,12 @@ Current shipped size, so regressions are visible rather than gradual:
 | Asset | Raw | Gzip |
 |---|---|---|
 | wasm (wasm-opt applied) | 623 KB | 232 KB |
-| js (React + Radix + app) | 359 KB | 117 KB |
-| css | 25 KB | 5 KB |
+| js (React + Radix + app) | 372 KB | 120 KB |
+| css (incl. tw-animate-css) | 38 KB | 7 KB |
+| font (Inter, latin subset) | 48 KB | — |
+
+The browser fetches only the Inter subsets whose unicode-range the page uses,
+so the other subset files in `dist/` cost nothing unless that script appears.
 
 If the js figure climbs without a feature to show for it, check that
 `lucide-react` and the `radix-ui` meta package are still tree-shaking.
