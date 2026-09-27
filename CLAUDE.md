@@ -17,12 +17,23 @@ and opened, and the artwork exports as SVG.
 Every v0.1 feature is in. What stands between that and "done" is Roger's
 browser pass over everything since 2026-09-25 (below) and the Pages deploy.
 
-**Verified:** 59 Rust tests, `clippy --all-targets -D warnings` clean, the web
-build, and `apps/web/scripts/smoke.mjs` — which drives the real wasm module
-through draw / transform / undo / redo / save / reload and asserts on rendered
-pixels, including draw / select / drag / delete, pen / path-edit and export
-passes. These four are the
-bar for any change.
+An architecture pass followed on 2026-09-27: the editing session moved from
+the wasm crate into core, rendering became incremental with zero-copy pixels,
+and the artboard size became document state. What is next, and the known
+architectural debt, is in `ROADMAP.md`.
+
+**Verified — the bar for any change:**
+
+- `cargo test --workspace` — 81 tests, including a randomized check that
+  incremental redraws equal full redraws pixel for pixel
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- the web build (`tsc -b` + Vite)
+- `pnpm smoke` — the real wasm module end to end, asserting on pixels
+- `pnpm ui` — the React app driven in jsdom against the real core: 77 checks,
+  including that the canvas equals a full redraw of the same document
+
+Anything on a per-frame path also gets `pnpm bench` before and after; see
+Performance rules.
 
 **Browser-checked 2026-09-25** by Roger on the deployed Pages build: shapes
 appear, undo/redo and their disabled states are right, save -> reload -> load
@@ -31,10 +42,10 @@ missing favicon (since fixed). This box has no browser engine, so anything
 changed after that date is verified headlessly only until he looks again — in
 particular the theme switch, the redesigned chrome, and all canvas
 interaction (tools, handles, marquee, pen, path editing, shortcuts), and
-autosave / restore / file open / downloads. The React side of all that was
-exercised in jsdom against the real wasm core, with fake-indexeddb standing
-in for IndexedDB — a scratch harness, not part of the repo — which is the
-closest this box gets to a browser.
+autosave / restore / file open / downloads. The React side of all that is
+exercised by `pnpm ui` (jsdom, the real wasm core, fake-indexeddb), which is
+the closest this box and CI get to a browser — but it cannot judge layout,
+feel or looks.
 
 ## Commands
 
@@ -43,6 +54,8 @@ pnpm build:wasm   # wasm-pack build -> apps/web/src/wasm (gitignored)
 pnpm dev          # build wasm, then Vite dev server
 pnpm build        # production build of the web app
 pnpm smoke        # wasm boundary end-to-end, no browser needed
+pnpm ui           # the React app in jsdom against the real core
+pnpm bench        # per-frame costs; compare before and after perf work
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings   # what CI runs
 cargo fmt --all
@@ -58,7 +71,8 @@ build now**. Extensibility comes from getting a small number of hard-to-reverse
 decisions right (see Load-bearing decisions), not from creating empty crates or
 speculative plugin traits.
 
-Rule: if a feature is not in v0.1, no crate, trait, or module exists for it yet.
+Rule: if a feature is not in the current milestone (see `ROADMAP.md`), no
+crate, trait, or module exists for it yet.
 
 ## v0.1 — definition of done
 
@@ -112,10 +126,18 @@ document (arena) -> layout pass -> RenderScene (immutable snapshot) -> Renderer
 
 - The **layout pass** is a no-op in v0.1. It exists so Figma-style auto layout
   has a place to live that is already wired into the pipeline.
-- `RenderScene` is a flat immutable snapshot. The renderer never walks the live
+- `RenderScene` is a flat snapshot. The renderer never walks the live
   document.
-- `Renderer` accepts a dirty rect. Redrawing everything is the v0.1
-  *implementation*, not the v0.1 *interface*.
+- **Only what changed is redrawn.** Every node mutation goes through
+  `Document::get_mut`, `attach` or `detach`, which record it in a change log.
+  `RenderScene::update` drains that log, refreshes just the affected items and
+  reports `Damage` — where they were plus where they are — and the renderer
+  redraws only that rect. Never add a way to change a node that bypasses those
+  three methods: the canvas would silently stop updating.
+- A partial redraw must equal a full redraw pixel for pixel;
+  `graphicgene-render/tests/incremental.rs` checks it over random edits. The
+  CPU renderer's scratch buffer is full-size on purpose — `cpu.rs` explains
+  the seams a rect-sized one leaves.
 
 ### Rendering
 
@@ -133,6 +155,26 @@ document (arena) -> layout pass -> RenderScene (immutable snapshot) -> Renderer
 Use `kurbo` for bezier math, and `lyon` when GPU tessellation arrives.
 Hand-rolled bezier and boolean code is a multi-month detour with worse numerics.
 
+### The editing session lives in core
+
+`graphicgene_core::session::Session` owns the document, the undo journal, the
+selection and whichever interaction is in progress, and every rule tying them
+together: undo while drawing removes a pen anchor, Delete means whatever the
+current mode has selected, Enter and Escape leave a mode, undo prunes the
+selection. It takes typed arguments in document space.
+
+A platform shell — `graphicgene-wasm` today, a Tauri app later — only
+translates: ids to strings, pointer positions to document points, results to
+JSON and pixels. **A rule written in a shell is a rule the two apps will
+disagree on**, and one only JS can test. Pick tolerances look like shell
+logic but are not: they are screen distances divided by the zoom, which only
+the shell knows, so the shell measures them and passes them in — the rules
+that use them stay in core.
+
+The web shell still decides which core API a press goes to (`Stage.tsx`:
+tool → pen, path edit or gesture). A native UI would need that routing too;
+moving it into core is on the roadmap.
+
 ### IO boundary
 
 **Core crates perform no IO.** They produce and consume bytes; the app layer
@@ -144,6 +186,14 @@ is sync, and a core that assumes either one cannot run on the other platform.
 The document lives in Rust. React renders a view of it and sends commands back.
 React must never hold authoritative document state — the moment it does, the web
 and desktop apps drift apart and the core stops being the product.
+
+That includes the artboard: its size is `Document::artboard`, saved in the
+file, and the web app reads it from the core (`editor.width` / `height`).
+The 800 × 600 in `App.tsx` only seeds a brand-new document.
+
+What React does keep is view state — the active tool, the theme, status-bar
+messages — plus caches of core data keyed on a version the core hands out
+(`layersVersion`), never a copy it edits.
 
 ### The UI layer: Tailwind v4 + shadcn
 
@@ -215,7 +265,9 @@ DOM-rendering Rust framework such as Dioxus, not an immediate-mode toolkit.
   (`anchors.rs`); the file still stores plain `BezPath`s. A pen path joins
   the journal only when finished, so undo while drawing removes the last
   anchor (`pen.rs`); path edits commit one `SetPath` per drag
-  (`path_edit.rs`).
+  (`path_edit.rs`). Anchor ids are positions, so after anything that adds or
+  removes anchors, path editing drops its anchor selection rather than let it
+  point at a different anchor.
 - Undo/redo and replay are what the journal actually buys. **It does not decide
   collaboration**: multiplayer needs a conflict model (tree CRDT for node moves,
   or a server-authoritative sequencer), deferred until there is a reason to pick
@@ -242,21 +294,27 @@ before anything else, and unknown fields round-trip rather than being dropped.
 Three crates. New crates appear when compile time or dependency isolation
 demands them, not in advance.
 
+The core modules in the order data flows: `doc` (arena + change log),
+`command` (journal), `session` (the rules), then what the session drives —
+`selection`, `hit`, `gesture`, `anchors`, `pen`, `path_edit` — and the
+outputs: `layout`, `svg`, `project`.
+
 ```
 graphicgene/
 ├── Cargo.toml              # Cargo workspace
 ├── pnpm-workspace.yaml     # pnpm workspace (pnpm only)
 ├── crates/
-│   ├── graphicgene-core/   # nodes, commands, selection, gestures, pen, SVG export, project file
-│   ├── graphicgene-render/ # RenderScene, Renderer trait, CPU renderer
-│   └── graphicgene-wasm/   # wasm-bindgen bindings (the batching boundary)
+│   ├── graphicgene-core/   # document, commands, the editing session, SVG, project file
+│   ├── graphicgene-render/ # incremental RenderScene, Renderer trait, CPU renderer
+│   └── graphicgene-wasm/   # thin wasm-bindgen shell over the session
 └── apps/
     └── web/
         ├── src/
         │   ├── components/ui/   # vendored shadcn — edit freely, that is the point
         │   ├── editor.ts        # the only file that touches wasm
         │   └── styles.css       # Tailwind theme + density tokens
-        └── scripts/             # browser-free smoke test of the wasm boundary
+        └── scripts/             # smoke.mjs (wasm boundary), ui.mjs (React in jsdom),
+                                 # bench.mjs (per-frame costs)
 ```
 
 `graphicgene-core` stays dependency-light (`kurbo`, `slotmap`, `serde`,
@@ -268,23 +326,44 @@ ambiguous between the two projects.
 
 ## Performance rules
 
-- No allocation in per-frame paths. `RenderScene` is rebuilt per edit, not per
-  frame.
+- No allocation in per-frame paths. The scene is updated in place from the
+  change log and rebuilt only when the tree's shape changes. Known exceptions:
+  each refreshed item clones its path, and the overlay crosses as JSON.
+- Pixels never cross the wasm boundary by copy. `render()` returns the changed
+  rect; the page reads the pixels in place from wasm memory
+  (`EditorHandle.pixels()`) and blits only that rect. They are premultiplied
+  RGBA, which equals the straight alpha `ImageData` expects only while every
+  pixel is opaque — true while the artboard is painted white.
+- Views cache core data on versions (`layersVersion`) that hold still through
+  a drag, so a drag does not rebuild the layer panel every frame.
 - No `Box<dyn ..>` in hot loops.
 - The WASM boundary is a batching boundary: one call per interaction, never one
   call per node. Hot data crosses as a typed buffer, not per-node JSON.
-- Hit-testing and rendering will both need spatial acceleration eventually. v0.1
-  does linear scans, but no interface may expose that assumption.
+- Hit-testing and damage will both need spatial acceleration eventually. Both
+  still scan linearly — hit-testing with a control-box broad phase — but no
+  interface may expose that assumption.
 - Profile before tuning `opt-level`. Start WASM release at `opt-level = "s"` +
   `lto = true` + `wasm-opt`. `"z"` often costs real runtime in geometry-heavy
   code; the tradeoff must be measured, not assumed.
+
+Frame costs from `pnpm bench` — 500 nodes on an 800 × 600 artboard, Node 24
+on this box, mean per frame. Update this table whenever a per-frame path
+changes; the 2026-09-27 column is before incremental rendering.
+
+| Scenario | 2026-09-27 before | now |
+|---|---|---|
+| drag one shape (update + pixels to canvas) | 9.36 ms | 0.11 ms |
+| drag everything (worst case: all damaged) | — | 9.2 ms |
+| frame with nothing changed (selection, hover) | 9.31 ms | 0.001 ms |
+| hover hit-test | 0.097 ms | 0.011 ms |
+| read the layer rows | 0.62 ms, twice a frame | 0.68 ms, only when they change |
 
 Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 751 KB | 291 KB |
-| js (React + Radix + app) | 390 KB | 126 KB |
+| wasm (wasm-opt applied) | 769 KB | 299 KB |
+| js (React + Radix + app) | 392 KB | 126 KB |
 | css (incl. tw-animate-css) | 39 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |
 
@@ -294,17 +373,11 @@ so the other subset files in `dist/` cost nothing unless that script appears.
 If the js figure climbs without a feature to show for it, check that
 `lucide-react` and the `radix-ui` meta package are still tree-shaking.
 
-## After v0.1 — and what each step depends on
+## Roadmap
 
-| Step | What it needs |
-|---|---|
-| Text (v0.2) | `cosmic-text` / `rustybuzz` shaping, font loading, text->path on export. Large enough to be its own milestone; deliberately out of v0.1. |
-| Boolean ops | `kurbo` path intersection. Numerically the hardest vector feature. |
-| Desktop (Tauri) | Nothing new in core — if the IO-boundary and state-ownership rules held. This step is the test of whether they did. |
-| GPU renderer | A second `Renderer` impl (`wgpu` / `vello`). |
-| Raster (Photoshop-ish) | New `NodeKind`, pixel buffers, real blend modes. Possible only because of the linear-`f32` color decision. |
-| Components / auto layout (Figma-ish) | Node references plus overrides on stable `NodeId`s; auto layout fills in the existing layout pass. |
-| Collaboration | A backend, and a conflict model chosen at that time. |
+`ROADMAP.md` holds the milestones after v0.1, what each depends on, and the
+known architectural debt. Keep it current: when a decision here changes what
+a later step needs, say so there.
 
 ## Dependency policy
 
@@ -316,8 +389,9 @@ behind is not.
 Two standing exceptions:
 
 - **Verify, don't assume.** A major version goes in only after `cargo test`,
-  `clippy --all-targets -D warnings`, the web build and `pnpm smoke` all pass on
-  it. "Latest" is a starting hypothesis, not a merge criterion.
+  `clippy --all-targets -D warnings`, the web build, `pnpm smoke` and
+  `pnpm ui` all pass on it. "Latest" is a starting hypothesis, not a merge
+  criterion.
 - **Don't chase pre-1.0 crates that churn.** `wgpu` in particular breaks its API
   most releases; pin it when it arrives and upgrade deliberately.
 
@@ -326,6 +400,10 @@ Current floor: **Node >= 22.12** (Vite 8 requires it; see `.nvmrc`). Rust
 
 Supply chain is the one real security surface here, so keep the dependency
 count low — it is the reason core takes four crates and not fourteen.
+
+The one deliberate exception is dev-only: `jsdom` and `fake-indexeddb` (about
+30 packages) run `pnpm ui`, the only check of the React layer in CI. None of
+it ships. Revisit if a lighter DOM ever covers what `ui.mjs` needs.
 
 ## Conventions
 
@@ -339,7 +417,8 @@ count low — it is the reason core takes four crates and not fourteen.
 
 ## Deployment
 
-- GitHub Actions: `wasm-pack build --release` -> pnpm build -> GitHub Pages.
+- GitHub Actions: fmt, clippy, tests -> `wasm-pack build --release` -> smoke
+  -> ui -> pnpm build -> GitHub Pages.
 - Use `Swatinem/rust-cache` in CI.
 - The web app must respect the GitHub Pages base path (repo name).
 - GitHub Pages cannot set COOP/COEP, so `SharedArrayBuffer` and WASM threads are

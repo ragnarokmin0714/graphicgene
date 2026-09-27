@@ -1,17 +1,22 @@
 # graphicgene
 
-A web-based vector graphics editor, built on a Rust core compiled to WebAssembly.
+A vector graphics editor for the web, built on a Rust core compiled to
+WebAssembly.
 
-Designed so that raster and UI-design features can be added later without
-rewriting the core — the document model, colour pipeline and render boundary are
-already shaped for it.
+It is designed so that raster editing (Photoshop-like) and UI design
+(Figma-like) can be added later without rewriting the core: the document
+model, the colour pipeline and the render boundary are already shaped for
+them.
 
-> **Status: v0.1 preview.** Draw rectangles, ellipses and bezier paths with a
-> pen tool; select, move, scale and rotate them; edit any path point by point;
-> undo everything. Work autosaves in the browser, project files can be
-> downloaded and reopened, and the artwork exports as SVG.
+**Try it:** <https://ragnarokmin0714.github.io/graphicgene/>
 
-### Using it
+> **Status: v0.1 preview.** Draw rectangles, ellipses and bezier paths;
+> select, move, scale and rotate them; edit any path point by point; undo
+> everything. Work autosaves in the browser, project files can be downloaded
+> and reopened, and the artwork exports as SVG. What comes next is in
+> [`ROADMAP.md`](ROADMAP.md).
+
+## Using it
 
 | | |
 |---|---|
@@ -24,23 +29,33 @@ already shaped for it.
 | `Ctrl/⌘ Z`, `Ctrl/⌘ Shift Z` | Undo, redo |
 | `Ctrl/⌘ O`, `Ctrl/⌘ Shift E` | Open a project file, export SVG |
 
-## Architecture
+## How it is built
 
 ```
-document (arena)  →  layout pass  →  RenderScene  →  Renderer
+document (arena + change log) → layout pass → RenderScene → Renderer → pixels
+          ▲                                     (updated in place;    (only the
+    editing session                              reports damage)      damaged rect)
+          ▲
+   platform shell (wasm today, desktop later) ◄── React UI
 ```
 
 | Crate | Responsibility |
 |---|---|
-| `graphicgene-core` | Node tree, commands and undo, geometry, layout, project file. Performs no IO and touches no platform API. |
-| `graphicgene-render` | Immutable render scene, the `Renderer` trait, and a CPU backend (`tiny-skia`). |
-| `graphicgene-wasm` | The `wasm-bindgen` boundary — one call per interaction, never one per node. |
+| `graphicgene-core` | The document, commands and undo, and the editing session — selection, drags, the pen, path editing, and the rules tying them together. Performs no IO and touches no platform API. |
+| `graphicgene-render` | The render scene, updated in place from the document's change log; the `Renderer` trait; a CPU backend on `tiny-skia`. |
+| `graphicgene-wasm` | A thin shell over the session: ids as strings, results as JSON, pixels read in place from wasm memory. |
 
-The UI (`apps/web`) is React + Tailwind + shadcn, and holds **no** document
-state: the document lives in Rust, and React renders a view of it.
+The UI (`apps/web`) is React, Tailwind and shadcn, and holds **no** document
+state: the document lives in Rust, and React renders a view of it and sends
+commands back. A desktop shell would drive the same session.
 
-`CLAUDE.md` documents the decisions behind this — which ones are load-bearing,
-and why — and is worth reading before changing anything structural.
+Only what changes is redrawn, and pixels never cross the wasm boundary by
+copy. With 500 shapes on the artboard, a frame of dragging one of them costs
+about 0.1 ms of work in the core.
+
+[`CLAUDE.md`](CLAUDE.md) records the decisions behind all this — which are
+load-bearing, and why — and is worth reading before changing anything
+structural.
 
 ## Getting started
 
@@ -52,14 +67,22 @@ pnpm install
 pnpm dev      # builds the wasm package, then starts Vite
 ```
 
-Other tasks:
+## Checks
+
+None of these needs a browser, which is how CI runs them:
 
 ```sh
-pnpm build    # production build
-pnpm smoke    # drives the real wasm module and asserts on rendered pixels
-cargo test --workspace
+cargo test --workspace                                  # core and renderer
 cargo clippy --workspace --all-targets -- -D warnings
+pnpm smoke    # the real wasm module end to end, asserting on pixels
+pnpm ui       # the React app in jsdom, against the real core
+pnpm bench    # per-frame costs, to compare before and after a change
+pnpm build    # production build
 ```
+
+`pnpm ui` drives the app with synthetic pointer and keyboard events and even
+checks that the canvas matches a full redraw, but it cannot judge layout,
+feel or looks — changes to those still need a look in a real browser.
 
 ## Licence
 

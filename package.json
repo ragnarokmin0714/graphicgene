@@ -8,7 +8,9 @@
     "build": "pnpm build:wasm && pnpm --filter @graphicgene/web build",
     "test": "cargo test --workspace",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings",
-    "smoke": "pnpm build:wasm && pnpm --filter @graphicgene/web smoke"
+    "smoke": "pnpm build:wasm && pnpm --filter @graphicgene/web smoke",
+    "ui": "pnpm build:wasm && pnpm --filter @graphicgene/web ui",
+    "bench": "pnpm build:wasm && pnpm --filter @graphicgene/web bench"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
