@@ -398,6 +398,12 @@ Two standing exceptions:
 Current floor: **Node >= 22.12** (Vite 8 requires it; see `.nvmrc`). Rust
 **edition 2024**.
 
+CI builds with the newest stable Rust, whatever this box has. A new release
+can add clippy lints that fail CI with no code change — Rust 1.98's
+`chunks_exact_to_as_chunks` did on 2026-09-27, while clippy here on 1.97 was
+clean. Before trusting a local clippy run, `rustup check`; if stable has
+moved, update it (or run `cargo +<version> clippy …` with CI's version).
+
 Supply chain is the one real security surface here, so keep the dependency
 count low — it is the reason core takes four crates and not fourteen.
 
@@ -419,6 +425,12 @@ it ships. Revisit if a lighter DOM ever covers what `ui.mjs` needs.
 
 - GitHub Actions: fmt, clippy, tests -> `wasm-pack build --release` -> smoke
   -> ui -> pnpm build -> GitHub Pages.
+- Runners are pinned (`ubuntu-24.04`), not `ubuntu-latest`: a new image is a
+  major version like any other, adopted by a commit once CI passes on it.
+- Actions stay on majors that run on a current Node (24 as of 2026-09). When
+  GitHub warns about a deprecated Node runtime, bump them — and replace any
+  action that has stopped being maintained, as `jetli/wasm-pack-action` was
+  (wasm-pack now comes from `cargo install --locked`).
 - Use `Swatinem/rust-cache` in CI.
 - The web app must respect the GitHub Pages base path (repo name).
 - GitHub Pages cannot set COOP/COEP, so `SharedArrayBuffer` and WASM threads are

@@ -14,11 +14,15 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# Runners are pinned to an Ubuntu release on purpose: `ubuntu-latest` moves to
+# a new major on GitHub's schedule, which would change CI with no commit to
+# show for it. Moving up is a deliberate one-line change, made once CI has
+# passed on the new image — the same rule as any other major version.
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -30,17 +34,20 @@ jobs:
 
   build:
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: jetli/wasm-pack-action@v0.4.0
+      # From crates.io rather than a third-party action (the one used before
+      # stopped at Node 16). rust-cache keeps ~/.cargo/bin, so this compiles
+      # once and is a no-op until a new wasm-pack is released.
+      - run: cargo install wasm-pack --locked
       # No `version:` here on purpose — action-setup reads `packageManager`
       # from package.json, and specifying both fails with
       # "Multiple versions of pnpm specified".
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -55,16 +62,16 @@ jobs:
         run: pnpm --filter @graphicgene/web build
         env:
           GG_BASE: /${{ github.event.repository.name }}/
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: apps/web/dist
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
