@@ -2,10 +2,12 @@ import { X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { EditorMode, Rgba } from "@/editor";
+import { SWATCHES } from "@/color";
+import type { EditorMode } from "@/editor";
 import { download } from "@/files";
 import { Header } from "@/Header";
 import { LayerPanel } from "@/LayerPanel";
+import { type PropertyActions, PropertiesPanel } from "@/PropertiesPanel";
 import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
 import { StatusBar, type ZoomActions } from "@/StatusBar";
@@ -25,15 +27,6 @@ const AUTOSAVE_DELAY = 800;
 /** Arrow-key nudge, and with Shift held, in document units. */
 const NUDGE = 1;
 const NUDGE_LARGE = 10;
-
-/** Fills for new shapes, cycled so a fresh canvas is not a wall of one colour. */
-const SWATCHES: readonly Rgba[] = [
-  [99, 102, 241, 255],
-  [244, 114, 94, 255],
-  [20, 184, 166, 255],
-  [245, 176, 65, 255],
-  [217, 70, 239, 255],
-];
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 
@@ -57,8 +50,8 @@ function hintFor(tool: Tool, mode: EditorMode | null): string | null {
 }
 
 /**
- * v0.1 shell. Every handler sends a command into the core and re-reads what
- * came back; nothing here mirrors document state. Selection lives in the core
+ * The app shell. Every handler sends a command into the core and re-reads
+ * what came back; nothing here mirrors document state. Selection lives in the core
  * as well, because it drives transforms.
  *
  * What React does keep is view state: the active tool, and `notice`, a
@@ -97,10 +90,24 @@ export function App() {
   const layerCount = layers.length;
   const selectionCount = core?.selectionCount ?? 0;
   const mode = core?.mode ?? null;
+  // Read every render, since a canvas drag changes it every frame; the
+  // object stays the same while nothing in it changes, so the panel is
+  // memoised on it.
+  const properties = core?.properties() ?? null;
   const nextFill = () => SWATCHES[layerCount % SWATCHES.length];
 
   const selectLayer = useCallback(
     (id: string, additive: boolean) => run((editor) => editor.selectLayer(id, additive)),
+    [run],
+  );
+
+  const propertyActions: PropertyActions = useMemo(
+    () => ({
+      onPreview: (change) => run((editor) => editor.previewProperty(change)),
+      onCommit: () => run((editor) => editor.commitProperty()),
+      onCancel: () => run((editor) => editor.cancelProperty()),
+      onSet: (change) => run((editor) => editor.setProperty(change)),
+    }),
     [run],
   );
 
@@ -296,6 +303,7 @@ export function App() {
         )}
 
         <main className="flex min-h-0 flex-1">
+          <LayerPanel layers={layers} onSelect={selectLayer} />
           {/* The backdrop colour shows only until the core's first frame. */}
           <section className="bg-canvas-backdrop relative min-w-0 flex-1">
             <Stage
@@ -315,7 +323,7 @@ export function App() {
               canRedo={core?.canRedo ?? false}
             />
           </section>
-          <LayerPanel layers={layers} onSelect={selectLayer} />
+          <PropertiesPanel properties={properties} {...propertyActions} />
         </main>
 
         <StatusBar

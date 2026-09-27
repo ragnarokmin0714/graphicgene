@@ -29,12 +29,14 @@ for (const key of [
   "window",
   "document",
   "Node",
+  "NodeFilter",
   "Element",
   "HTMLElement",
   "HTMLInputElement",
   "HTMLCanvasElement",
   "SVGElement",
   "Event",
+  "CustomEvent",
   "MouseEvent",
   "PointerEvent",
   "WheelEvent",
@@ -277,9 +279,14 @@ try {
     }
     await pointer("pointerup", ...to, options);
   };
+  // As a browser does: at whatever has focus, through document and window,
+  // and cancelable, so a control that handles a key can say so.
   const key = (name, options = {}, type = "keydown") =>
     act(async () => {
-      window.dispatchEvent(new window.KeyboardEvent(type, { key: name, bubbles: true, ...options }));
+      const target = document.activeElement ?? document.body;
+      target.dispatchEvent(
+        new window.KeyboardEvent(type, { key: name, bubbles: true, cancelable: true, ...options }),
+      );
     });
   const press = (button) => act(async () => button.click());
   const button = (label) => document.querySelector(`button[aria-label="${label}"]`);
@@ -532,6 +539,129 @@ try {
   await checkScreen("after zooming");
   await key("0", { ctrlKey: true });
   check(!!button("Zoom 100%"), "Ctrl+0 is 100%");
+
+  section("Properties panel");
+  const panel = () => document.querySelector('aside[aria-label="Properties"]');
+  const field = (name) => panel().querySelector(`input[aria-label="${name}"]`);
+  const value = (name) => field(name)?.value ?? null;
+  const typeInto = async (name, text, commit = "Enter") => {
+    const input = field(name);
+    await act(async () => input.focus());
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, text);
+      input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    });
+    if (commit) await key(commit);
+  };
+  /** Drag a field's label sideways by `dx` screen pixels; `midway` runs before the release. */
+  const scrub = async (name, dx, midway = async () => {}) => {
+    const label = field(name).parentElement.querySelector("span");
+    const fire = (type, x) =>
+      act(async () =>
+        label.dispatchEvent(
+          new window.PointerEvent(type, { bubbles: true, clientX: x, button: 0, pointerId: 2 }),
+        ),
+      );
+    await fire("pointerdown", 100);
+    for (let i = 1; i <= 4; i++) await fire("pointermove", 100 + (dx * i) / 4);
+    await midway();
+    await fire("pointerup", 100 + dx);
+  };
+  const screenPixel = (x, y) => {
+    const [sx, sy] = toScreen(x, y).map(Math.round);
+    const { pixels, width } = screenOf(canvas());
+    return Array.from(pixels.slice((sy * width + sx) * 4, (sy * width + sx) * 4 + 3));
+  };
+  const frameOf = () => ["X", "Y", "Width", "Height"].map(value).join(" ");
+
+  await key("Escape");
+  check(panel().textContent.includes("Nothing selected"), "with nothing selected, the panel says so");
+  await key("r");
+  await drag([600, 350], [700, 410]);
+  check(frameOf() === "600 350 100 60", `it shows the new shape's frame (${frameOf()})`);
+  check(/^[0-9A-F]{6}$/.test(value("Fill hex")) && value("Opacity") === "100", "its fill and opacity");
+  check(!field("Stroke hex") && !!button("Add stroke"), "and that it has no stroke");
+
+  await typeInto("X", "150");
+  check(frame()?.startsWith("150,350 "), `typing X and Enter moves it (${frame()})`);
+  check(document.activeElement === document.body, "and hands the keyboard back");
+  await key("z", { ctrlKey: true });
+  check(value("X") === "600", "one undo step");
+  await key("z", { ctrlKey: true, shiftKey: true });
+
+  await scrub("Width", 40);
+  check(value("Width") === "140" && sizeLabel() === "140 × 60", `scrubbing W's label resizes (${sizeLabel()})`);
+  check(frame()?.startsWith("150,350 "), "from the left edge");
+  await key("z", { ctrlKey: true });
+  check(value("Width") === "100", "and the whole scrub is one undo step");
+  let midway = null;
+  await scrub("Width", 40, async () => {
+    midway = sizeLabel();
+    await key("Escape");
+  });
+  check(midway === "140 × 60" && value("Width") === "100", `Escape mid-scrub puts it back (${midway})`);
+  check(status().includes("1 selected"), "and keeps the selection");
+  await key("z", { ctrlKey: true });
+  check(value("X") === "600", "leaving nothing in the history");
+  await key("z", { ctrlKey: true, shiftKey: true });
+
+  await typeInto("Rotation", "90");
+  const [c0, c1] = corners();
+  check(value("Rotation") === "90" && Math.abs(c0[0] - c1[0]) < 1e-6 && c1[1] < c0[1], "rotation turns it counter-clockwise");
+  await typeInto("Rotation", "0");
+
+  await typeInto("Y", "250", null);
+  await pointer("pointerdown", 780, 580);
+  await pointer("pointerup", 780, 580);
+  await act(async () => document.activeElement.blur());
+  check(!status().includes("selected"), "a press on the canvas moves on...");
+  await click(200, 280);
+  check(value("Y") === "250", `...after applying what was typed, to the shape it was typed for (${frameOf()})`);
+
+  await typeInto("Fill hex", "#0f0");
+  check(value("Fill hex") === "00FF00", `hex digits set the fill (${value("Fill hex")})`);
+  check(screenPixel(200, 280).join() === "0,255,0", `which the canvas shows (${screenPixel(200, 280)})`);
+  await press(button("Remove fill"));
+  check(!field("Fill hex") && !!button("Add fill"), "the fill can be removed");
+  await key("z", { ctrlKey: true });
+  check(value("Fill hex") === "00FF00", "and undo brings it back");
+
+  await press(button("Add stroke"));
+  check(value("Stroke hex") === "000000" && value("Stroke width") === "1", "Add stroke gives a thin black one");
+  await typeInto("Stroke width", "4");
+  await typeInto("Opacity", "50");
+  check(value("Stroke width") === "4" && value("Opacity") === "50", "stroke width and opacity take typed values");
+  await key("z", { ctrlKey: true });
+  await key("z", { ctrlKey: true });
+  check(value("Opacity") === "100" && value("Stroke width") === "1", "each one undo step");
+  await checkScreen("after property edits");
+
+  await press(button("Fill colour"));
+  const picker = document.querySelector('[data-slot="popover-content"]');
+  check(!!picker, "the swatch opens a colour picker");
+  const square = picker.querySelector('[aria-label="Fill saturation and brightness"]');
+  square.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 });
+  const firePicker = (type, x, y) =>
+    act(async () =>
+      square.dispatchEvent(new window.PointerEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0, pointerId: 3 })),
+    );
+  await firePicker("pointerdown", 50, 50);
+  check(value("Fill hex") === "408040", `dragging in the square previews (${value("Fill hex")})`);
+  await firePicker("pointermove", 0, 0);
+  await firePicker("pointerup", 0, 0);
+  check(value("Fill hex") === "FFFFFF", `and releasing keeps it (${value("Fill hex")})`);
+  await key("z", { ctrlKey: true });
+  check(value("Fill hex") === "00FF00", "the whole picker drag is one undo step");
+  await firePicker("pointerdown", 0, 100);
+  check(value("Fill hex") === "000000", "pressing in the square previews at once");
+  await key("Escape");
+  await firePicker("pointerup", 0, 100);
+  check(value("Fill hex") === "00FF00", "Escape mid-drag puts the colour back");
+  check(!!document.querySelector('[data-slot="popover-content"]'), "and leaves the picker open");
+  await key("Escape");
+  check(!document.querySelector('[data-slot="popover-content"]'), "a second Escape closes it");
+  check(status().includes("1 selected"), "without deselecting");
+  await checkScreen("after the colour picker");
 
   section("Files");
   await press([...document.querySelectorAll("header button")].find((b) => b.textContent.includes("Export SVG")));

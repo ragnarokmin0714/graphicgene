@@ -27,6 +27,7 @@ use graphicgene_core::geom::{Affine, BezPath, Ellipse, Point, Rect, Shape, Size,
 use graphicgene_core::gesture::{Modifiers, ShapeKind, TransformKind};
 use graphicgene_core::node::{Node, NodeId, Stroke};
 use graphicgene_core::path_edit::PressOutcome;
+use graphicgene_core::properties::{Properties, Property, Shared};
 use graphicgene_core::session::{Mode, Overlay, SelectOutcome, Session};
 use graphicgene_core::view::{MAX_ZOOM, View};
 use graphicgene_render::{
@@ -424,6 +425,56 @@ impl Editor {
         to_json(&Value::Array(rows))
     }
 
+    // ---- Properties panel ----------------------------------------------------------
+    //
+    // Values here are what the user types — document units, degrees — not
+    // pointer positions, so they bypass the view. Colours are 4 sRGB bytes.
+
+    /// What the properties panel shows, as JSON: `null` with nothing
+    /// selected, else `{count, x, y, width, height, rotation, opacity, fill,
+    /// stroke, strokeWidth}`. Rotation is in degrees, counter-clockwise. A
+    /// value the selected nodes do not share is `"mixed"`. A colour is
+    /// `[r, g, b, a]`, or `null` for none; `fill` and `stroke` are left out
+    /// when only groups are selected, `strokeWidth` when nothing is stroked.
+    pub fn properties(&self) -> Result<String, JsError> {
+        let value = match self.session.properties().map_err(to_js)? {
+            Some(properties) => properties_json(&properties),
+            None => Value::Null,
+        };
+        to_json(&value)
+    }
+
+    /// Show a change to the selection without recording it: every move of a
+    /// slider or a scrubbed number. `change` is JSON with one key — `x`,
+    /// `y`, `width`, `height`, `rotation`, `opacity` (0–1), `fill` (a colour
+    /// or `null`), `stroke` (`null`, or `{color, width}`), `strokeColor` or
+    /// `strokeWidth`. False when there is nothing it could apply to.
+    #[wasm_bindgen(js_name = previewProperty)]
+    pub fn preview_property(&mut self, change: &str) -> Result<bool, JsError> {
+        let property = parse_property(change)?;
+        self.session.preview_property(property).map_err(to_js)
+    }
+
+    /// Record the previews as one undo step; true if anything changed.
+    #[wasm_bindgen(js_name = commitProperty)]
+    pub fn commit_property(&mut self) -> Result<bool, JsError> {
+        self.session.commit_property().map_err(to_js)
+    }
+
+    /// Drop the previews, restoring what was there before them.
+    #[wasm_bindgen(js_name = cancelProperty)]
+    pub fn cancel_property(&mut self) -> Result<bool, JsError> {
+        self.session.cancel_property().map_err(to_js)
+    }
+
+    /// Change the selection as one undo step: a typed value, a stepped one,
+    /// a removed fill. Takes the same JSON as `previewProperty`.
+    #[wasm_bindgen(js_name = setProperty)]
+    pub fn set_property(&mut self, change: &str) -> Result<bool, JsError> {
+        let property = parse_property(change)?;
+        self.session.set_property(property).map_err(to_js)
+    }
+
     // ---- Selection ---------------------------------------------------------------
     //
     // From here on, (x, y) is a screen point and `tolerance` a screen
@@ -797,6 +848,86 @@ fn overlay_json(overlay: &Overlay, to_screen: Affine, artboard: Size) -> Value {
         });
     }
     value
+}
+
+fn properties_json(p: &Properties) -> Value {
+    fn shared<T>(value: Shared<T>, to_value: impl Fn(T) -> Value) -> Value {
+        match value {
+            Shared::Same(v) => to_value(v),
+            Shared::Mixed => json!("mixed"),
+        }
+    }
+    let colour = |c: Option<LinearRgba>| c.map_or(Value::Null, |c| json!(c.to_srgb8()));
+    let mut out = json!({
+        "count": p.count,
+        "x": p.x,
+        "y": p.y,
+        "width": p.width,
+        "height": p.height,
+        "rotation": p.rotation,
+        "opacity": shared(p.opacity, |o| json!(o)),
+    });
+    if let Some(fill) = p.fill {
+        out["fill"] = shared(fill, colour);
+    }
+    if let Some(stroke) = p.stroke {
+        out["stroke"] = shared(stroke, colour);
+    }
+    if let Some(width) = p.stroke_width {
+        out["strokeWidth"] = shared(width, |w| json!(w));
+    }
+    out
+}
+
+/// A property change from the page: JSON with exactly one key. Parsed by
+/// hand from a `Value`: a derived enum does the same in twice the wasm.
+fn parse_property(change: &str) -> Result<Property, JsError> {
+    let invalid = |why: &str| JsError::new(&format!("invalid property change: {why}"));
+    let value: Value = serde_json::from_str(change).map_err(|e| invalid(&e.to_string()))?;
+    let Some((key, value)) = value
+        .as_object()
+        .filter(|o| o.len() == 1)
+        .and_then(|o| o.iter().next())
+    else {
+        return Err(invalid("expected an object with one key"));
+    };
+    let number = || value.as_f64().ok_or_else(|| invalid("expected a number"));
+    let colour =
+        |value: &Value| colour_value(value).ok_or_else(|| invalid("expected [r, g, b, a]"));
+    Ok(match key.as_str() {
+        "x" => Property::X(number()?),
+        "y" => Property::Y(number()?),
+        "width" => Property::Width(number()?),
+        "height" => Property::Height(number()?),
+        "rotation" => Property::Rotation(number()?),
+        "opacity" => Property::Opacity(number()? as f32),
+        "fill" if value.is_null() => Property::Fill(None),
+        "fill" => Property::Fill(Some(colour(value)?)),
+        "stroke" if value.is_null() => Property::Stroke(None),
+        "stroke" => Property::Stroke(Some(Stroke {
+            color: colour(&value["color"])?,
+            width: value["width"]
+                .as_f64()
+                .ok_or_else(|| invalid("a stroke needs a width"))?,
+        })),
+        "strokeColor" => Property::StrokeColor(colour(value)?),
+        "strokeWidth" => Property::StrokeWidth(number()?),
+        _ => return Err(invalid(&format!("unknown property {key}"))),
+    })
+}
+
+/// `[r, g, b, a]` in sRGB bytes.
+fn colour_value(value: &Value) -> Option<LinearRgba> {
+    let byte = |c: &Value| c.as_u64().and_then(|c| u8::try_from(c).ok());
+    match value.as_array()?.as_slice() {
+        [r, g, b, a] => Some(LinearRgba::from_srgb8(
+            byte(r)?,
+            byte(g)?,
+            byte(b)?,
+            byte(a)?,
+        )),
+        _ => None,
+    }
 }
 
 fn mode_name(mode: Mode) -> &'static str {

@@ -21,6 +21,7 @@ pub mod node;
 pub mod path_edit;
 pub mod pen;
 pub mod project;
+pub mod properties;
 pub mod selection;
 pub mod session;
 pub mod svg;

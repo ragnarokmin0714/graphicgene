@@ -12,9 +12,10 @@ them.
 
 > **Status: v0.1 preview, v0.2 under way.** Draw rectangles, ellipses and
 > bezier paths; select, move, scale and rotate them; edit any path point by
-> point; zoom and pan, sharp on HiDPI screens; undo everything. Work
-> autosaves in the browser, project files can be downloaded and reopened,
-> and the artwork exports as SVG. What comes next is in
+> point; set position, size, rotation, opacity, fill and stroke in a
+> properties panel; zoom and pan, sharp on HiDPI screens; undo everything.
+> Work autosaves in the browser, project files can be downloaded and
+> reopened, and the artwork exports as SVG. What comes next is in
 > [`ROADMAP.md`](ROADMAP.md).
 
 ## Using it
@@ -27,6 +28,8 @@ them.
 | Double-click a path | Edit its points: drag points and handles, click a segment to add a point, double-click a point for corner/curve |
 | Handles on a selection | Scale (`Shift` keeps proportions, `Alt` from the centre); just outside a corner rotates (`Shift` snaps to 15°) |
 | Arrow keys | Nudge 1px, 10px with `Shift` |
+| Properties panel | Type a value and press `Enter`; `↑` `↓` step it (`Shift` for 10); drag a field's label sideways to scrub; `Esc` puts back what was being typed or scrubbed |
+| Colour swatch | Opens a picker: drag in the square or along the hue and opacity strips, or pick a preset |
 | Scroll, `Space`+drag, middle-drag | Pan |
 | `Ctrl/⌘`+scroll, pinch | Zoom about the pointer |
 | `Ctrl/⌘ +` `−` `0`, `Shift 1` | Zoom in, out, to 100%, to fit the artboard |

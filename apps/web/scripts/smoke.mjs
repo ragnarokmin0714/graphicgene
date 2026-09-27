@@ -236,4 +236,39 @@ reference.setView(viewed.zoom, viewed.panX, viewed.panY);
 reference.render();
 assert.deepEqual(viewed.pixelBytes(), reference.pixelBytes(), "the same view draws the same pixels");
 
+// The properties panel: document units whatever the view, colours as the
+// sRGB bytes that went in, and a scrub previewed many times is one undo step.
+const inspected = new Editor(W, H);
+assert.equal(inspected.properties(), "null", "nothing selected");
+const box = inspected.addRect(10, 10, 20, 20, RED);
+inspected.selectLayer(box, false);
+let props = JSON.parse(inspected.properties());
+assert.deepEqual([props.x, props.y, props.width, props.height, props.rotation], [10, 10, 20, 20, 0]);
+assert.deepEqual([props.opacity, props.fill, props.stroke], [1, [255, 0, 0, 255], null]);
+assert.equal("strokeWidth" in props, false, "nothing is stroked, so no width");
+
+for (const x of [12, 20, 30]) assert.equal(inspected.previewProperty(JSON.stringify({ x })), true);
+assert.equal(inspected.busy(), true, "a preview is not saved");
+assert.equal(inspected.commitProperty(), true);
+assert.equal(inspected.busy(), false);
+assert.equal(JSON.parse(inspected.properties()).x, 30);
+inspected.undo();
+assert.equal(JSON.parse(inspected.properties()).x, 10, "the whole scrub was one undo step");
+
+inspected.setProperty(JSON.stringify({ strokeColor: [0, 0, 255, 255] }));
+props = JSON.parse(inspected.properties());
+assert.deepEqual([props.stroke, props.strokeWidth], [[0, 0, 255, 255], 1], "a new stroke is thin");
+inspected.setProperty(JSON.stringify({ fill: [0, 255, 0, 128] }));
+const [r, g, b] = pixel(draw(inspected), 20, 20);
+assert.ok(Math.abs(r - 127) <= 1 && g === 255 && Math.abs(b - 127) <= 1, `half-green: ${[r, g, b]}`);
+// Two units wide, so the stroke covers the pixels either side of the edge.
+inspected.setProperty(JSON.stringify({ strokeWidth: 2 }));
+assert.deepEqual(pixel(draw(inspected), 10, 20).slice(0, 3), [0, 0, 255], "the stroke, on the edge");
+
+assert.throws(() => inspected.setProperty('{"colour": 1}'), /unknown property colour/);
+assert.throws(() => inspected.setProperty('{"fill": [300, 0, 0, 255]}'), /\[r, g, b, a\]/);
+assert.throws(() => inspected.setProperty('{"x": 1, "y": 2}'), /one key/);
+inspected.clearSelection();
+assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to");
+
 console.log("smoke: ok");

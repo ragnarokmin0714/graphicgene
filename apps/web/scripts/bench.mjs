@@ -17,6 +17,8 @@
  *   hover   — one hover hit-test as the pointer crosses the artboard
  *   layers  — reading the layer panel's rows
  *   overlay — reading the selection overlay
+ *   properties — reading the properties panel's values, which the app does
+ *             on every frame of a drag: for one node, and for all of them
  *
  * Run with: pnpm --filter @graphicgene/web bench   (after pnpm build:wasm)
  */
@@ -160,6 +162,9 @@ results.push(
 
 editor.selectLayer(target, false);
 results.push(measure("overlay", 240, () => JSON.parse(editor.overlay())));
+results.push(measure("properties", 240, () => JSON.parse(editor.properties())));
+editor.selectAll();
+results.push(measure("properties (all 500)", 120, () => JSON.parse(editor.properties())));
 
 console.log(`graphicgene bench — ${ids.length} nodes, ${W}×${H}\n`);
 console.log("scenario".padEnd(26) + "mean ms".padStart(10) + "p95 ms".padStart(10));

@@ -29,7 +29,49 @@ export type LayerRow = {
   selected: boolean;
 };
 
+/** A colour as sRGB bytes with straight alpha, 0–255 each. */
 export type Rgba = [number, number, number, number];
+
+/** A value the selected nodes do not share. */
+export type Mixed = "mixed";
+
+/**
+ * What the properties panel shows. Position and size are in document units,
+ * rotation in degrees counter-clockwise, opacity 0–1.
+ */
+export type Properties = {
+  count: number;
+  /** The selection frame's top-left corner, in the frame's own orientation. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Always 0 for several nodes: they share an unrotated box. */
+  rotation: number;
+  opacity: number | Mixed;
+  /** `null` is no fill; left out when only groups are selected. */
+  fill?: Rgba | null | Mixed;
+  /** The stroke colour, as `fill`: `null` is no stroke. */
+  stroke?: Rgba | null | Mixed;
+  /** Of the strokes there are; left out when nothing is stroked. */
+  strokeWidth?: number | Mixed;
+};
+
+/** One change made through the properties panel. */
+export type PropertyChange =
+  | { x: number }
+  | { y: number }
+  | { width: number }
+  | { height: number }
+  | { rotation: number }
+  | { opacity: number }
+  | { fill: Rgba | null }
+  /** Removes strokes; `strokeColor` adds them. */
+  | { stroke: null }
+  /** Recolours strokes, adding a thin one where there is none. */
+  | { strokeColor: Rgba }
+  /** Re-widths the strokes there are. */
+  | { strokeWidth: number };
 
 /** A point in screen pixels: CSS pixels from the viewport's top-left corner. */
 export type Point = readonly [number, number];
@@ -401,6 +443,46 @@ export class EditorHandle {
     return this.view!;
   }
 
+  // The properties panel. Values are what the user types — document units,
+  // degrees — not screen pixels.
+
+  private lastProperties: { json: string; value: Properties | null } | null = null;
+
+  /**
+   * What the panel shows for the selection, or null with nothing selected.
+   * Returns the same object for as long as nothing in it changes, so a view
+   * can memoise on it; it does change on every frame of a drag.
+   */
+  properties(): Properties | null {
+    const json = this.inner.properties();
+    if (this.lastProperties?.json !== json) {
+      this.lastProperties = { json, value: JSON.parse(json) as Properties | null };
+    }
+    return this.lastProperties.value;
+  }
+
+  /**
+   * Show a change without recording it: each move of a scrub or a picker
+   * drag. `commitProperty` records them all as one undo step.
+   */
+  previewProperty(change: PropertyChange): boolean {
+    return this.inner.previewProperty(JSON.stringify(change));
+  }
+
+  commitProperty(): boolean {
+    return this.inner.commitProperty();
+  }
+
+  /** Drop the previews and put back what was there. True if there were any. */
+  cancelProperty(): boolean {
+    return this.inner.cancelProperty();
+  }
+
+  /** Change the selection as one undo step: a typed value, a picked swatch. */
+  setProperty(change: PropertyChange): boolean {
+    return this.inner.setProperty(JSON.stringify(change));
+  }
+
   layers(): LayerRow[] {
     return JSON.parse(this.inner.layerTree()) as LayerRow[];
   }
@@ -441,7 +523,7 @@ export class EditorHandle {
     return { width: this.inner.artboardWidth, height: this.inner.artboardHeight };
   }
 
-  /** A press is in progress and the document holds a preview: do not save now. */
+  /** A press or a property edit is in progress and the document holds a preview: do not save now. */
   get busy(): boolean {
     return this.inner.busy();
   }

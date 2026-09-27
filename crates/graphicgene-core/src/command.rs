@@ -17,7 +17,7 @@ use crate::color::LinearRgba;
 use crate::doc::Document;
 use crate::error::{CoreError, Result};
 use crate::geom::{Affine, BezPath};
-use crate::node::{Node, NodeId, NodeKind};
+use crate::node::{Node, NodeId, NodeKind, Stroke};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
@@ -54,6 +54,10 @@ pub enum Command {
     SetFill {
         id: NodeId,
         fill: Option<LinearRgba>,
+    },
+    SetStroke {
+        id: NodeId,
+        stroke: Option<Stroke>,
     },
     SetPath {
         id: NodeId,
@@ -147,6 +151,20 @@ impl Command {
                 }
             }
 
+            Command::SetStroke { id, stroke } => {
+                let node = doc.get_mut(*id)?;
+                match &mut node.kind {
+                    NodeKind::Vector(v) => {
+                        let previous = std::mem::replace(&mut v.stroke, *stroke);
+                        Ok(Command::SetStroke {
+                            id: *id,
+                            stroke: previous,
+                        })
+                    }
+                    NodeKind::Group(_) => Err(CoreError::NotAVector(*id)),
+                }
+            }
+
             Command::SetPath { id, path } => {
                 let node = doc.get_mut(*id)?;
                 match &mut node.kind {
@@ -195,6 +213,7 @@ impl Command {
             | Command::SetVisible { id, .. }
             | Command::Rename { id, .. }
             | Command::SetFill { id, .. }
+            | Command::SetStroke { id, .. }
             | Command::SetPath { id, .. } => Some(*id),
             Command::Batch(commands) => commands.first().and_then(Command::target),
         }

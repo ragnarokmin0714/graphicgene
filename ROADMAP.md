@@ -20,8 +20,8 @@ The things anyone misses in their first five minutes.
 | Item | What it needs |
 |---|---|
 | ~~Zoom and pan, sharp on HiDPI~~ | **Done 2026-09-28.** `core::view` holds zoom and pan; the canvas covers the stage in device pixels; pans shift pixels and redraw only the new strip, then settle into an exact full redraw; wheel, pinch, Space-drag and middle-drag, zoom shortcuts and a zoom menu. |
-| **Properties panel** | Fill, stroke colour and width, opacity; X / Y / W / H / rotation fields. Needs `SetStroke` and `SetLocked` commands, a colour picker that converts 8-bit sRGB to the linear model, and a preview-then-commit path for continuous controls — a slider dragged across fifty values is one undo step, as a canvas drag already is. |
-| **Layer panel operations** | Rename (the first text input; shortcuts already ignore text fields), visibility and lock toggles, drag to reorder (a move command: detach plus attach in one batch), group and ungroup (baking transforms in and out). |
+| ~~Properties panel~~ | **Done 2026-09-28.** X / Y / W / H, rotation (counter-clockwise, as in Figma), opacity, fill and stroke colour with alpha, stroke width. Fields take typed values, arrow steps and scrubbing on their labels; a colour picker works in HSV over sRGB bytes, which the core converts to its linear model. `core::properties` previews and commits like a canvas drag, so a scrub across fifty values is one undo step and Escape puts it back. |
+| **Layer panel operations** | Rename (shortcuts already ignore text fields; the panel's fields show how drafts commit), visibility and lock toggles (a `SetLocked` command beside `SetVisible`), drag to reorder (a move command: detach plus attach in one batch), group and ungroup (baking transforms in and out). |
 | **Clipboard and duplicate** | Nodes serialized to JSON on the clipboard, pasted with fresh ids. |
 | **PNG export** | A tiny-skia render at a chosen scale. Core returns the bytes; the app layer saves them. |
 | **Tool routing in core** | Which core call a press goes to — pen, path edit or a gesture — is still decided in `Stage.tsx`. Moving it into the session as pointer down / move / up per tool means a native shell gets it for free. |
@@ -90,6 +90,11 @@ Known and deliberate, roughly in the order it will start to hurt.
    need anchors with stable ids.
 9. **Open paths lose their outer end handles.** A `BezPath` has nowhere to
    keep them; it matters once paths can be continued from an end.
+10. **Colours are edited in 8-bit sRGB.** The picker and the wasm boundary
+    speak sRGB bytes while the document keeps linear floats. Harmless while
+    all colour is sRGB; a wide-gamut or HDR colour would be clipped to 8 bits
+    the moment it is edited. The boundary would then carry floats, and the
+    picker its own colour space.
 
 ## Done in the 2026-09-27 architecture pass
 

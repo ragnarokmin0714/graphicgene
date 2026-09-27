@@ -18,6 +18,7 @@
   --spacing-bar: 2.5rem; /* 40px — header and panel title bars */
   --spacing-status: 1.5rem; /* 24px — status bar */
   --spacing-tool: 2rem; /* 32px — floating tool dock buttons */
+  --spacing-control: 1.5rem; /* 24px — panel inputs, same as xs buttons */
 
   --text-ui: 0.75rem; /* 12px — panel and menu body */
   --text-ui--line-height: 1rem;
@@ -57,6 +58,10 @@
   --ring: oklch(0.56 0.2 278);
 
   --float-shadow: 0 1px 2px rgb(20 20 40 / 0.06), 0 8px 24px -6px rgb(20 20 40 / 0.14);
+
+  /* Behind colours with transparency. The same in both themes, as in every
+     design tool: it stands for "nothing here", not for the UI's surface. */
+  --checker: repeating-conic-gradient(#d9d9d9 0 25%, #fff 0 50%);
 
   /* The canvas surround is deliberately not --background: artwork must be
      judged against a neutral field, not against the UI's own tint. */
@@ -118,6 +123,21 @@
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
+}
+
+@utility bg-checker {
+  background-image: var(--checker);
+  background-size: 8px 8px;
+}
+
+/* A swatch standing for several different colours. */
+@utility bg-mixed {
+  background: linear-gradient(
+    135deg,
+    var(--muted) 42%,
+    var(--muted-foreground) 42% 58%,
+    var(--muted) 58%
+  );
 }
 
 @layer base {

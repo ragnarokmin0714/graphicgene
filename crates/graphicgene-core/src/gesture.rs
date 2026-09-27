@@ -109,8 +109,9 @@ impl Frame {
         )
     }
 
-    /// The frame's rotation in radians: the angle of its top edge.
-    fn angle(&self) -> f64 {
+    /// The frame's rotation in radians: the angle of its top edge, clockwise
+    /// on screen since the document's y axis points down.
+    pub fn angle(&self) -> f64 {
         let [a, b, ..] = self.transform.as_coeffs();
         b.atan2(a)
     }

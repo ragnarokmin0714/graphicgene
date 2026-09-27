@@ -14,6 +14,9 @@
 //!
 //! Tolerances are passed in rather than fixed here: they are screen
 //! distances divided by the zoom, which only the shell knows.
+//!
+//! One interaction at a time: starting anything else — a press, undo, a new
+//! selection — first abandons a property edit left open, as it does a drag.
 
 use std::fmt;
 
@@ -29,6 +32,7 @@ use crate::node::{Node, NodeId, NodeKind, Stroke};
 use crate::path_edit::{DeleteOutcome, EditView, PathEdit, PressOutcome};
 use crate::pen::PenSession;
 use crate::project::Project;
+use crate::properties::{self, Properties, Property, PropertyEdit};
 use crate::selection::Selection;
 
 /// An interaction that outlives a single press.
@@ -130,6 +134,9 @@ pub struct Session {
     pen: Option<PenSession>,
     /// The path whose anchors are being edited.
     path_edit: Option<PathEdit>,
+    /// A properties-panel change being previewed. Never together with a
+    /// gesture or the pen.
+    property_edit: Option<PropertyEdit>,
     /// Bumped whenever a different document is loaded.
     generation: u64,
 }
@@ -160,6 +167,7 @@ impl Session {
 
     /// Add a node at the top of the root, as one undo step.
     pub fn insert(&mut self, node: Node) -> Result<NodeId> {
+        self.cancel_property()?;
         let parent = self.document.root();
         let index = self.document.children_of(parent)?.len();
         self.journal.execute(
@@ -175,6 +183,7 @@ impl Session {
 
     /// Apply a command as one undo step.
     pub fn execute(&mut self, command: Command) -> Result<()> {
+        self.cancel_property()?;
         self.journal.execute(&mut self.document, command)
     }
 
@@ -182,6 +191,7 @@ impl Session {
     /// the unfinished path is not in the journal yet.
     pub fn undo(&mut self) -> Result<bool> {
         self.cancel_gesture()?;
+        self.cancel_property()?;
         if let Some(pen) = self.pen.as_mut() {
             if !pen.undo_anchor(&mut self.document)? {
                 let pen = self.pen.take().expect("checked above");
@@ -200,6 +210,7 @@ impl Session {
             return Ok(false);
         }
         self.cancel_gesture()?;
+        self.cancel_property()?;
         self.cancel_path_drag()?;
         let changed = self.journal.redo(&mut self.document)?;
         self.after_history_change(changed)?;
@@ -214,12 +225,13 @@ impl Session {
         self.pen.is_none() && self.journal.can_redo()
     }
 
-    /// Whether a press is in progress, so the document holds a preview that
-    /// should not be saved yet: a drag, a pen path, or a path-edit drag.
+    /// Whether the document holds a preview that should not be saved yet: a
+    /// drag, a pen path, a path-edit drag or a property edit in progress.
     pub fn busy(&self) -> bool {
         self.gesture.is_some()
             || self.pen.is_some()
             || self.path_edit.as_ref().is_some_and(PathEdit::is_dragging)
+            || self.property_edit.is_some()
     }
 
     /// The project file. The copy written drops detached nodes: the live
@@ -238,6 +250,7 @@ impl Session {
         self.gesture = None;
         self.pen = None;
         self.path_edit = None;
+        self.property_edit = None;
         self.hover = None;
         self.document = project.document;
         self.journal.clear();
@@ -265,7 +278,8 @@ impl Session {
     /// Rows only change through the journal, the tree's shape, the selection
     /// or a load — never through a drag's preview, which writes transforms and
     /// paths only. So the version holds still for a whole drag and the panel
-    /// is not rebuilt on every frame of one.
+    /// is not rebuilt on every frame of one. A property preview can change a
+    /// row's opacity; the rows show it once the edit is committed.
     pub fn layers_version(&self) -> LayersVersion {
         LayersVersion {
             generation: self.generation,
@@ -316,6 +330,7 @@ impl Session {
         additive: bool,
         tolerance: f64,
     ) -> Result<SelectOutcome> {
+        self.cancel_property()?;
         let hit = hit::hit_test(&self.document, point, tolerance)?;
         Ok(match (hit, self.selection.click(hit, additive)) {
             (_, true) => SelectOutcome::Drag,
@@ -327,6 +342,7 @@ impl Session {
     /// A click on a layer-panel row. Ends the pen or path editing.
     pub fn select_layer(&mut self, id: NodeId, additive: bool) -> Result<()> {
         self.document.get(id)?;
+        self.cancel_property()?;
         self.finish_mode()?;
         if additive {
             self.selection.toggle(id);
@@ -337,6 +353,7 @@ impl Session {
     }
 
     pub fn select_all(&mut self) -> Result<()> {
+        self.cancel_property()?;
         self.finish_mode()?;
         let ids = hit::selectable(&self.document)?;
         self.selection.set(ids);
@@ -344,6 +361,7 @@ impl Session {
     }
 
     pub fn clear_selection(&mut self) -> Result<()> {
+        self.cancel_property()?;
         self.finish_mode()?;
         self.selection.clear();
         Ok(())
@@ -366,6 +384,7 @@ impl Session {
     /// last pen anchor while drawing, the selected anchors while editing a
     /// path, otherwise the selected nodes.
     pub fn delete_selection(&mut self) -> Result<bool> {
+        self.cancel_property()?;
         if self.pen.is_some() {
             return self.undo();
         }
@@ -403,6 +422,7 @@ impl Session {
         if self.pen.is_some() || self.gesture.is_some() {
             return Ok(false);
         }
+        self.cancel_property()?;
         if let Some(edit) = self.path_edit.as_mut() {
             return edit.nudge(&mut self.document, &mut self.journal, offset);
         }
@@ -428,6 +448,7 @@ impl Session {
     /// selection has nothing to manipulate.
     pub fn begin_transform(&mut self, kind: TransformKind, point: Point) -> Result<bool> {
         self.cancel_gesture()?;
+        self.cancel_property()?;
         self.gesture = Gesture::transform(&self.document, &self.selection, kind, point)?;
         Ok(self.gesture.is_some())
     }
@@ -435,6 +456,7 @@ impl Session {
     /// Start drawing a shape.
     pub fn begin_create(&mut self, shape: ShapeKind, fill: LinearRgba, point: Point) -> Result<()> {
         self.cancel_gesture()?;
+        self.cancel_property()?;
         let gesture = Gesture::create(&mut self.document, &mut self.selection, shape, fill, point)?;
         self.gesture = Some(gesture);
         Ok(())
@@ -442,6 +464,7 @@ impl Session {
 
     pub fn begin_marquee(&mut self, point: Point, additive: bool) -> Result<()> {
         self.cancel_gesture()?;
+        self.cancel_property()?;
         self.gesture = Some(Gesture::marquee(&self.selection, point, additive));
         Ok(())
     }
@@ -490,6 +513,7 @@ impl Session {
             Some(pen) => pen.press(&mut self.document, point, modifiers, tolerance)?,
             None => {
                 self.cancel_gesture()?;
+                self.cancel_property()?;
                 self.end_path_edit()?;
                 let pen =
                     PenSession::start(&mut self.document, &mut self.selection, stroke, point)?;
@@ -574,6 +598,7 @@ impl Session {
             return Ok(false);
         };
         self.cancel_gesture()?;
+        self.cancel_property()?;
         self.path_edit = PathEdit::begin(&self.document, id)?;
         self.hover = None;
         Ok(self.path_edit.is_some())
@@ -586,6 +611,7 @@ impl Session {
         tolerance: f64,
         additive: bool,
     ) -> Result<PressOutcome> {
+        self.cancel_property()?;
         match self.path_edit.as_mut() {
             Some(edit) => edit.press(&mut self.document, point, tolerance, additive),
             None => Ok(PressOutcome::Miss),
@@ -615,6 +641,7 @@ impl Session {
     /// on the path it does nothing; off the path it stops editing. Returns
     /// whether editing continues.
     pub fn path_double_click(&mut self, point: Point, tolerance: f64) -> Result<bool> {
+        self.cancel_property()?;
         let Some(edit) = self.path_edit.as_mut() else {
             return Ok(false);
         };
@@ -627,6 +654,72 @@ impl Session {
         }
         self.end_path_edit()?;
         Ok(false)
+    }
+
+    // ---- Properties panel ------------------------------------------------------------
+    //
+    // A slider or a scrubbed number previews on every move and commits once
+    // on release; a typed value or a picked swatch is set in one call. Either
+    // way it is one undo step, and Escape restores what was there.
+
+    /// What the properties panel shows for the selection. `None` with
+    /// nothing selected, and while the pen is drawing.
+    pub fn properties(&self) -> Result<Option<Properties>> {
+        if self.pen.is_some() {
+            return Ok(None);
+        }
+        properties::properties(&self.document, self.selection.ids())
+    }
+
+    /// Show a change to the selection without recording it. The first
+    /// preview opens an edit on the selection as it is; each later one
+    /// replaces the last. Returns false, doing nothing, while the pen, a
+    /// drag or a path-edit drag is in progress, or with nothing selected.
+    pub fn preview_property(&mut self, property: Property) -> Result<bool> {
+        if self.property_edit.is_none() {
+            if self.pen.is_some()
+                || self.gesture.is_some()
+                || self.path_edit.as_ref().is_some_and(PathEdit::is_dragging)
+                || self.selection.is_empty()
+            {
+                return Ok(false);
+            }
+            let edit = PropertyEdit::begin(&self.document, self.selection.ids())?;
+            self.property_edit = Some(edit);
+        }
+        let edit = self.property_edit.as_ref().expect("opened above");
+        edit.preview(&mut self.document, property)?;
+        Ok(true)
+    }
+
+    /// Record what the previews changed as one undo step. Returns whether
+    /// anything changed: a value dragged back to where it started records
+    /// nothing.
+    pub fn commit_property(&mut self) -> Result<bool> {
+        match self.property_edit.take() {
+            Some(edit) => edit.commit(&mut self.document, &mut self.journal),
+            None => Ok(false),
+        }
+    }
+
+    /// Abandon the previews, putting back the values from before the first.
+    /// Returns whether an edit was open.
+    pub fn cancel_property(&mut self) -> Result<bool> {
+        let Some(edit) = self.property_edit.take() else {
+            return Ok(false);
+        };
+        edit.cancel(&mut self.document)?;
+        Ok(true)
+    }
+
+    /// Change the selection as one undo step: a typed value, a stepped one,
+    /// a removed fill. Returns whether anything changed.
+    pub fn set_property(&mut self, property: Property) -> Result<bool> {
+        self.cancel_property()?;
+        if !self.preview_property(property)? {
+            return Ok(false);
+        }
+        self.commit_property()
     }
 
     // ---- Overlay -------------------------------------------------------------------

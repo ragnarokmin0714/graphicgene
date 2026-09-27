@@ -21,20 +21,23 @@ An architecture pass followed on 2026-09-27: the editing session moved from
 the wasm crate into core, rendering became incremental with zero-copy pixels,
 and the artboard size became document state. v0.2 work started on 2026-09-28
 with zoom and pan: the canvas now covers the whole stage in device pixels, so
-it is sharp on HiDPI screens. What is next, and the known architectural debt,
-is in `ROADMAP.md`.
+it is sharp on HiDPI screens. The properties panel followed the same day:
+position, size, rotation, opacity, fill and stroke, typed, stepped or
+scrubbed, each change one undo step. What is next, and the known
+architectural debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 93 tests, including a randomized check that
+- `cargo test --workspace` — 103 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 94 checks,
-  including zoom and pan, and that the canvas equals a full redraw of the
-  same document at the same view
+- `pnpm ui` — the React app driven in jsdom against the real core: 128
+  checks, including zoom and pan, the properties panel and its colour
+  picker, and that the canvas equals a full redraw of the same document at
+  the same view
 
 Anything on a per-frame path also gets `pnpm bench` before and after; see
 Performance rules.
@@ -44,12 +47,12 @@ appear, undo/redo and their disabled states are right, save -> reload -> load
 restores the document, edges are crisp, and the console is clean apart from a
 missing favicon (since fixed). This box has no browser engine, so anything
 changed after that date is verified headlessly only until he looks again — in
-particular the theme switch, the redesigned chrome, and all canvas
-interaction (tools, handles, marquee, pen, path editing, shortcuts), and
-autosave / restore / file open / downloads. The React side of all that is
-exercised by `pnpm ui` (jsdom, the real wasm core, fake-indexeddb), which is
-the closest this box and CI get to a browser — but it cannot judge layout,
-feel or looks.
+particular the theme switch, the redesigned chrome, all canvas interaction
+(tools, handles, marquee, pen, path editing, shortcuts, zoom and pan), the
+properties panel and colour picker, and autosave / restore / file open /
+downloads. The React side of all that is exercised by `pnpm ui` (jsdom, the
+real wasm core, fake-indexeddb), which is the closest this box and CI get to
+a browser — but it cannot judge layout, feel or looks.
 
 ## Commands
 
@@ -229,10 +232,13 @@ Two rules keep it from spreading where it does not belong:
 Theme is a per-viewer preference, not document state: `useTheme.ts` keeps it
 in React and localStorage, and an inline script in `index.html` applies it
 before first paint. Keep the two in sync. Keyboard shortcuts go through
-`useShortcuts` in `shortcuts.ts`, which already skips text fields — do not add
-ad-hoc `keydown` listeners. The exceptions are in `Stage.tsx` and change what
-a drag does rather than run a command: Shift and Alt during a drag, and Space
-held for panning. The backdrop colour reaches the core from the
+`useShortcuts` in `shortcuts.ts`, which already skips text fields and keys a
+control has handled (`preventDefault`: the Escape that ends a scrub or
+closes a popover must not also deselect) — do not add ad-hoc `keydown`
+listeners. The exceptions change what a drag does rather than run a
+command: Shift and Alt during a drag and Space held for panning
+(`Stage.tsx`), and Escape during a scrub or a colour drag (`fields.tsx`,
+`ColorPicker.tsx`). The backdrop colour reaches the core from the
 `--canvas-backdrop` token (`backdrop.ts`), re-read when the theme changes.
 
 Selection handles are the one place geometry is split: the core reports the
@@ -242,6 +248,14 @@ distance are screen measurements that must not scale with zoom.
 
 `--canvas-backdrop` is deliberately not `--background`: artwork has to be judged
 against a neutral field, not against the UI's tint.
+
+Panel fields live in `fields.tsx` and are `h-control` (24px). A typed value
+is applied on Enter, on blur — and on a press anywhere else, caught before
+that press runs, because a press on the canvas or a layer row changes the
+selection before the field blurs, and the value must land on the nodes it
+was typed for. The colour picker's HSV and hex maths (`color.ts`) is display
+maths over sRGB bytes; converting to the document's linear colour is the
+core's job.
 
 ### Why React rather than an all-Rust UI
 
@@ -272,6 +286,12 @@ DOM-rendering Rust framework such as Dioxus, not an immediate-mode toolkit.
   is one undo step and Escape restores the press-time state. See
   `gesture.rs`. Selection is session state in core (`selection.rs`): not
   saved, not undoable, but shared with the future desktop app.
+- Property edits (`properties.rs`) work the same way: each move of a scrub
+  or a colour drag previews from the state before the edit, and the release
+  commits one `Batch` of what actually changed — nothing, if the value came
+  back to where it started. A typed value is a preview and a commit in one
+  call. Starting anything else (a press, undo, a new selection) abandons an
+  edit left open, as it does a drag.
 - The pen and path editing work on an anchor view of the path
   (`anchors.rs`); the file still stores plain `BezPath`s. A pen path joins
   the journal only when finished, so undo while drawing removes the last
@@ -307,8 +327,8 @@ demands them, not in advance.
 
 The core modules in the order data flows: `doc` (arena + change log),
 `command` (journal), `session` (the rules), then what the session drives —
-`selection`, `hit`, `gesture`, `anchors`, `pen`, `path_edit` — and the
-outputs: `layout`, `svg`, `project`.
+`selection`, `hit`, `gesture`, `anchors`, `pen`, `path_edit`, `properties`
+— and the outputs: `layout`, `svg`, `project`.
 
 ```
 graphicgene/
@@ -374,16 +394,20 @@ changes; the 2026-09-27 column is before incremental rendering.
 | frame with nothing changed (selection, hover) | 9.31 ms | 0.001 ms |
 | hover hit-test | 0.097 ms | 0.011 ms |
 | read the layer rows | 0.62 ms, twice a frame | 0.69 ms, only when they change |
-| pan, 1440×900 viewport at 2x (shift + strip) | — | 0.69 ms |
+| pan, 1440×900 viewport at 2x (shift + strip) | — | 0.9 ms |
 | zoom, same viewport (full redraw) | — | 19 ms |
+| read the properties panel's values, every frame of a drag | — | 0.004 ms (one node), 0.11 ms (all 500) |
+
+Pan read 0.69 ms when it landed; on 2026-09-28 the same build measured
+0.9 ms, so treat that as this box's variance, not a regression.
 
 Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 789 KB | 308 KB |
-| js (React + Radix + app) | 399 KB | 128 KB |
-| css (incl. tw-animate-css) | 39 KB | 8 KB |
+| wasm (wasm-opt applied) | 807 KB | 316 KB |
+| js (React + Radix + app) | 419 KB | 133 KB |
+| css (incl. tw-animate-css) | 42 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |
 
 The browser fetches only the Inter subsets whose unicode-range the page uses,

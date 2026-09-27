@@ -32,7 +32,7 @@ const INDENT = 12;
  */
 export const LayerPanel = memo(function LayerPanel({ layers, onSelect }: Props) {
   return (
-    <aside className="bg-card w-panel flex shrink-0 flex-col border-l">
+    <aside className="bg-card w-panel flex shrink-0 flex-col border-r" aria-label="Layers">
       <div className="h-bar flex shrink-0 items-center gap-2 px-3">
         <h2 className="font-semibold">Layers</h2>
         {layers.length > 0 && (
