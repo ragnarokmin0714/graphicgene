@@ -61,7 +61,6 @@
   /* The canvas surround is deliberately not --background: artwork must be
      judged against a neutral field, not against the UI's own tint. */
   --canvas-backdrop: oklch(0.94 0 0);
-  --canvas-dot: oklch(0.82 0 0);
 }
 
 .dark {
@@ -90,7 +89,6 @@
   --float-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -8px rgb(0 0 0 / 0.6);
 
   --canvas-backdrop: oklch(0.135 0 0);
-  --canvas-dot: oklch(0.26 0 0);
 }
 
 @theme inline {
@@ -120,17 +118,6 @@
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
-}
-
-/*
- * Decorative dot grid behind the artboard. It is chrome, not geometry: once
- * zoom and pan exist the grid must follow the viewport transform from the
- * core, and this becomes an inline style like the other computed visuals.
- */
-@utility bg-dot-grid {
-  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
-  background-size: 16px 16px;
-  background-position: -8px -8px;
 }
 
 @layer base {

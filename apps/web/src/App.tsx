@@ -8,7 +8,7 @@ import { Header } from "@/Header";
 import { LayerPanel } from "@/LayerPanel";
 import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
-import { StatusBar } from "@/StatusBar";
+import { StatusBar, type ZoomActions } from "@/StatusBar";
 import { readProject, writeProject } from "@/storage";
 import { type Tool, ToolDock } from "@/ToolDock";
 import { useEditor } from "@/useEditor";
@@ -85,8 +85,8 @@ export function App() {
   const lastSaved = useRef<string | null>(null);
 
   const core = editor.current;
-  const width = core?.width ?? NEW_ARTBOARD.width;
-  const height = core?.height ?? NEW_ARTBOARD.height;
+  const artboard = core?.artboard ?? NEW_ARTBOARD;
+  const zoom = core?.zoom ?? 1;
   // Rows are re-read only when the core says they may have changed — never
   // during a drag, which is when this component re-renders every frame.
   const layersVersion = core?.layersVersion ?? null;
@@ -228,6 +228,14 @@ export function App() {
     { key, shift: true, repeat: true, run: () => nudge(x * NUDGE_LARGE, y * NUDGE_LARGE) },
   ]);
 
+  // The view: per-viewer state that the core keeps, like the selection.
+  const zoomActions: ZoomActions = {
+    zoomIn: () => run((editor) => editor.zoomIn()),
+    zoomOut: () => run((editor) => editor.zoomOut()),
+    zoomTo100: () => run((editor) => editor.zoomTo(1)),
+    zoomToFit: () => run((editor) => editor.zoomToFit()),
+  };
+
   useShortcuts([
     { key: "v", run: () => changeTool("select") },
     { key: "r", run: () => changeTool("rect") },
@@ -242,6 +250,13 @@ export function App() {
     { key: "z", mod: true, shift: true, run: redo },
     { key: "y", mod: true, run: redo },
     { key: "s", mod: true, run: () => void save(true) },
+    // "=" is where "+" lives unshifted; the numpad's "+" needs no Shift.
+    { key: "=", mod: true, run: zoomActions.zoomIn },
+    { key: "+", mod: true, run: zoomActions.zoomIn },
+    { key: "+", mod: true, shift: true, run: zoomActions.zoomIn },
+    { key: "-", mod: true, run: zoomActions.zoomOut },
+    { key: "0", mod: true, run: zoomActions.zoomTo100 },
+    { code: "Digit1", shift: true, run: zoomActions.zoomToFit },
     { key: "o", mod: true, run: () => fileInput.current?.click() },
     { key: "e", mod: true, shift: true, run: exportSvg },
     ...arrows,
@@ -281,13 +296,12 @@ export function App() {
         )}
 
         <main className="flex min-h-0 flex-1">
-          <section className="bg-canvas-backdrop bg-dot-grid relative min-w-0 flex-1">
+          {/* The backdrop colour shows only until the core's first frame. */}
+          <section className="bg-canvas-backdrop relative min-w-0 flex-1">
             <Stage
               editor={editor}
               revision={revision}
               run={run}
-              width={width}
-              height={height}
               tool={tool}
               nextFill={nextFill}
               onShapeDrawn={() => setTool("select")}
@@ -305,8 +319,9 @@ export function App() {
         </main>
 
         <StatusBar
-          width={width}
-          height={height}
+          artboard={artboard}
+          zoom={zoom}
+          zoomActions={zoomActions}
           layerCount={layerCount}
           selectionCount={selectionCount}
           hint={hintFor(tool, mode)}

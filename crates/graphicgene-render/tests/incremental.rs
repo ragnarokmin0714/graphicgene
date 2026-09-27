@@ -7,7 +7,9 @@ use graphicgene_core::color::LinearRgba;
 use graphicgene_core::doc::Document;
 use graphicgene_core::geom::{Affine, Ellipse, Rect, Shape};
 use graphicgene_core::node::{Node, NodeId, NodeKind, Stroke};
-use graphicgene_render::{CpuRenderer, Damage, PixelRect, RenderScene, Renderer};
+use graphicgene_render::{
+    CpuRenderer, Damage, PixelRect, RenderScene, Renderer, device_area, scroll,
+};
 use tiny_skia::Pixmap;
 
 /// The small target, for the tests that need only one.
@@ -63,13 +65,19 @@ fn attach(doc: &mut Document, parent: NodeId, node: Node) -> NodeId {
     id
 }
 
-fn full_render(doc: &Document, width: u32, height: u32) -> Pixmap {
+/// The grey around the artboard, so a missed redraw of the backdrop shows.
+fn backdrop() -> LinearRgba {
+    LinearRgba::from_srgb8(200, 200, 200, 255)
+}
+
+fn full_render(doc: &Document, view: Affine, width: u32, height: u32) -> Pixmap {
     let mut scene = RenderScene::build(doc).unwrap();
-    scene.background = Some(LinearRgba::WHITE);
+    scene.background = Some(backdrop());
     let mut pixmap = Pixmap::new(width, height).unwrap();
     CpuRenderer::new()
         .render(
             &scene,
+            view,
             Rect::new(0.0, 0.0, width.into(), height.into()),
             &mut pixmap,
         )
@@ -92,11 +100,13 @@ fn max_difference(a: &Pixmap, b: &Pixmap) -> u8 {
 /// go through the scratch buffer. Both paths must match a full redraw.
 #[test]
 fn incremental_redraws_match_a_full_redraw_through_random_edits() {
-    random_edits(160, 120, 400, 0x9E37_79B9_7F4A_7C15);
-    random_edits(640, 480, 120, 0xD1B5_4A32_D192_ED03);
+    let zoomed = Affine::translate((23.0, -17.0)) * Affine::scale(1.5);
+    random_edits(160, 120, 400, 0x9E37_79B9_7F4A_7C15, Affine::IDENTITY);
+    random_edits(640, 480, 120, 0xD1B5_4A32_D192_ED03, Affine::IDENTITY);
+    random_edits(640, 480, 120, 0x2545_F491_4F6C_DD1D, zoomed);
 }
 
-fn random_edits(width: u32, height: u32, steps: usize, seed: u64) {
+fn random_edits(width: u32, height: u32, steps: usize, seed: u64, view: Affine) {
     let mut rng = Rng(seed);
     let mut doc = Document::new();
     let root = doc.root();
@@ -111,7 +121,7 @@ fn random_edits(width: u32, height: u32, steps: usize, seed: u64) {
     nodes.push(group);
 
     let mut scene = RenderScene::default();
-    scene.background = Some(LinearRgba::WHITE);
+    scene.background = Some(backdrop());
     let mut renderer = CpuRenderer::new();
     let mut pixels = Pixmap::new(width, height).unwrap();
     let full = Rect::new(0.0, 0.0, width.into(), height.into());
@@ -170,15 +180,15 @@ fn random_edits(width: u32, height: u32, steps: usize, seed: u64) {
             }
             Damage::Region(region) => {
                 partial_frames += 1;
-                Some(region)
+                Some(device_area(view, region))
             }
             Damage::Everything => Some(full),
         };
         if let Some(dirty) = dirty {
-            renderer.render(&scene, dirty, &mut pixels).unwrap();
+            renderer.render(&scene, view, dirty, &mut pixels).unwrap();
         }
 
-        let reference = full_render(&doc, width, height);
+        let reference = full_render(&doc, view, width, height);
         let diff = max_difference(&pixels, &reference);
         assert_eq!(
             diff, 0,
@@ -218,7 +228,8 @@ fn moving_a_shape_damages_where_it_was_and_where_it_is() {
     let Damage::Region(region) = scene.update(&doc, &changes).unwrap() else {
         panic!("expected a region");
     };
-    assert!(region.contains((0.0, 0.0)) && region.contains((60.0, 10.0)));
+    // (Rect::contains excludes the far edges, so probe just inside them.)
+    assert!(region.contains((0.5, 0.5)) && region.contains((59.5, 9.5)));
     assert!(
         !region.contains((30.0, 40.0)),
         "and nothing far from either"
@@ -239,11 +250,11 @@ fn damage_includes_the_whole_stroke() {
     attach(&mut doc, root, node);
     let scene = RenderScene::build(&doc).unwrap();
     let b = scene.items[0].bounds;
-    // Half the width, times a miter limit of 4, plus a pixel of antialiasing.
-    assert!(
-        b.x0 <= 20.0 - 20.0 - 1.0 && b.x1 >= 30.0 + 20.0 + 1.0,
-        "{b:?}"
-    );
+    // Half the width, times a miter limit of 4.
+    assert!(b.x0 <= 20.0 - 20.0 && b.x1 >= 30.0 + 20.0, "{b:?}");
+    // Plus a device pixel of antialiasing, whatever the zoom.
+    let quarter = device_area(Affine::scale(0.25), b);
+    assert!(quarter.x0 <= b.x0 * 0.25 - 1.0, "{quarter:?}");
 }
 
 #[test]
@@ -253,7 +264,12 @@ fn a_partial_redraw_leaves_the_rest_of_the_target_alone() {
     let mut pixmap = Pixmap::new(W, H).unwrap();
     pixmap.fill(tiny_skia::Color::from_rgba8(0, 128, 0, 255));
     CpuRenderer::new()
-        .render(&scene, Rect::new(10.2, 10.7, 20.1, 20.0), &mut pixmap)
+        .render(
+            &scene,
+            Affine::IDENTITY,
+            Rect::new(10.2, 10.7, 20.1, 20.0),
+            &mut pixmap,
+        )
         .unwrap();
     let px = |x, y| pixmap.pixel(x, y).unwrap();
     assert_eq!(
@@ -289,4 +305,127 @@ fn pixel_rects_clip_and_reject_empty_areas() {
         PixelRect::covering(Rect::new(f64::NAN, 0.0, 5.0, 5.0), 10, 10),
         None
     );
+}
+
+/// Pan by shifting pixels, redrawing the uncovered strips, and compare with
+/// a full redraw at the new position; returns (largest difference, fraction
+/// of pixels off by more than 2).
+fn pan_against_full_redraws(doc: &Document) -> (u8, f64) {
+    let (width, height) = (200, 150);
+    let whole = Rect::new(0.0, 0.0, width.into(), height.into());
+    let mut scene = RenderScene::build(doc).unwrap();
+    scene.background = Some(backdrop());
+    let mut renderer = CpuRenderer::new();
+    let mut view = Affine::translate((-40.0, 12.0)) * Affine::scale(1.75);
+    let mut pixels = Pixmap::new(width, height).unwrap();
+    renderer.render(&scene, view, whole, &mut pixels).unwrap();
+
+    let (mut worst, mut worst_share) = (0u8, 0.0f64);
+    for (dx, dy) in [(17, -9), (-3, 25), (0, -40), (60, 0), (-199, 3), (500, 0)] {
+        view = Affine::translate((f64::from(dx), f64::from(dy))) * view;
+        for strip in scroll(&mut pixels, dx, dy) {
+            renderer
+                .render(&scene, view, strip.bounds(), &mut pixels)
+                .unwrap();
+        }
+        let reference = full_render(doc, view, width, height);
+        worst = worst.max(max_difference(&pixels, &reference));
+        let off = pixels
+            .data()
+            .chunks(4)
+            .zip(reference.data().chunks(4))
+            .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 2))
+            .count();
+        worst_share = worst_share.max(off as f64 / f64::from(width * height));
+    }
+    (worst, worst_share)
+}
+
+/// The shifting and strip logic, checked where rasterization is exactly
+/// translation-invariant: axis-aligned edges, which the canvas edge cannot
+/// change by cutting them.
+#[test]
+fn panning_by_shifting_pixels_matches_a_redraw_for_axis_aligned_edges() {
+    let mut rng = Rng(0xA076_1D64_78BD_642F);
+    let mut doc = Document::new();
+    let root = doc.root();
+    for _ in 0..30 {
+        let (x, y) = (
+            rng.range(-20.0, 150.0).round(),
+            rng.range(-20.0, 110.0).round(),
+        );
+        let (w, h) = (rng.range(4.0, 50.0).round(), rng.range(4.0, 40.0).round());
+        let rect = Rect::new(x, y, x + w, y + h).to_path(0.1);
+        attach(
+            &mut doc,
+            root,
+            Node::vector("Rect", rect, Some(rng.colour())),
+        );
+    }
+    let (worst, _) = pan_against_full_redraws(&doc);
+    assert!(worst <= 1, "differs by {worst}");
+}
+
+/// Any other edge cut by the old canvas edge — a curve, a slanted line — is
+/// rasterized from different cut points, so once shifted inward it can be a
+/// little off a fresh redraw (seen: up to ~40/255 on antialiased pixels).
+/// That is why the shell redraws in full once a pan settles. The difference
+/// must stay confined to such edge pixels, never whole strips.
+#[test]
+fn panning_by_shifting_pixels_is_close_for_curves_and_slants() {
+    let mut rng = Rng(0x94D0_49BB_1331_11EB);
+    let mut doc = Document::new();
+    let root = doc.root();
+    for _ in 0..30 {
+        let mut node = shape(&mut rng);
+        node.common.transform = Affine::rotate(rng.range(-0.5, 0.5));
+        attach(&mut doc, root, node);
+    }
+    let (_, share) = pan_against_full_redraws(&doc);
+    assert!(share < 0.005, "{:.2}% of pixels differ", share * 100.0);
+}
+
+#[test]
+fn scrolling_reports_the_strips_it_uncovered() {
+    let mut pixmap = Pixmap::new(10, 8).unwrap();
+    let strip = |x, y, width, height| PixelRect {
+        x,
+        y,
+        width,
+        height,
+    };
+    assert_eq!(
+        scroll(&mut pixmap, 3, -2),
+        [strip(0, 6, 10, 2), strip(0, 0, 3, 8)]
+    );
+    assert_eq!(scroll(&mut pixmap, 0, 0), [], "no shift, nothing uncovered");
+    assert_eq!(
+        scroll(&mut pixmap, -10, 0),
+        [strip(0, 0, 10, 8)],
+        "a whole width: everything"
+    );
+}
+
+#[test]
+fn scrolling_moves_pixels_by_exactly_the_shift() {
+    let mut pixmap = Pixmap::new(16, 12).unwrap();
+    // A distinct value per pixel, so any misplaced copy shows.
+    for (i, px) in pixmap.data_mut().chunks_mut(4).enumerate() {
+        px.copy_from_slice(&[(i % 251) as u8, (i / 251) as u8, 0, 255]);
+    }
+    let before = pixmap.clone();
+    let (dx, dy) = (-5, 3);
+    scroll(&mut pixmap, dx, dy);
+    for y in 0..12i32 {
+        for x in 0..16i32 {
+            let (sx, sy) = (x - dx, y - dy);
+            if (0..16).contains(&sx) && (0..12).contains(&sy) {
+                assert_eq!(
+                    pixmap.pixel(x as u32, y as u32),
+                    before.pixel(sx as u32, sy as u32),
+                    "({x}, {y})"
+                );
+            }
+        }
+    }
 }

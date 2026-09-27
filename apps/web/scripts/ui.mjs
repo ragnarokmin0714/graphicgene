@@ -37,6 +37,7 @@ for (const key of [
   "Event",
   "MouseEvent",
   "PointerEvent",
+  "WheelEvent",
   "KeyboardEvent",
   "FocusEvent",
   "DOMRect",
@@ -50,16 +51,29 @@ for (const key of [
 }
 define("IS_REACT_ACT_ENVIRONMENT", true);
 
-// What jsdom leaves out.
+// What jsdom leaves out. It does no layout, so every observed element — the
+// canvas viewport, above all — reports this size, at a pixel ratio of 1.
+const VIEWPORT = { width: 1000, height: 700 };
 window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 define("matchMedia", window.matchMedia);
-class NoResizeObserver {
-  observe() {}
+class SizedResizeObserver {
+  constructor(callback) {
+    this.callback = callback;
+  }
+  observe(target) {
+    const { width, height } = VIEWPORT;
+    const entry = {
+      target,
+      contentRect: { width, height },
+      devicePixelContentBoxSize: [{ inlineSize: width, blockSize: height }],
+    };
+    queueMicrotask(() => this.callback([entry], this));
+  }
   unobserve() {}
   disconnect() {}
 }
-define("ResizeObserver", NoResizeObserver);
-window.ResizeObserver = NoResizeObserver;
+define("ResizeObserver", SizedResizeObserver);
+window.ResizeObserver = SizedResizeObserver;
 Object.assign(window.Element.prototype, {
   setPointerCapture() {},
   releasePointerCapture() {},
@@ -83,7 +97,8 @@ window.HTMLAnchorElement.prototype.click = function () {
 };
 
 // The canvas: a 2D context whose putImageData copies into a "screen" buffer,
-// cleared whenever the element changes size, as a real one is.
+// cleared whenever the element changes size, as a real one is, and whose
+// drawImage can shift the canvas onto itself, as a pan does.
 class ImageData {
   constructor(data, width, height) {
     if (data.length !== width * height * 4) throw new RangeError("ImageData size mismatch");
@@ -101,6 +116,7 @@ function screenOf(canvas) {
       pixels: new Uint8ClampedArray(canvas.width * canvas.height * 4),
       puts: 0,
       partialPuts: 0,
+      shifts: 0,
     };
     screens.set(canvas, screen);
   }
@@ -109,6 +125,20 @@ function screenOf(canvas) {
 window.HTMLCanvasElement.prototype.getContext = function () {
   const canvas = this;
   return {
+    drawImage(source, dx, dy) {
+      if (source !== canvas) throw new Error("only a canvas drawn onto itself is faked");
+      const screen = screenOf(canvas);
+      screen.shifts++;
+      const { width, height, pixels } = screen;
+      const before = pixels.slice();
+      const span = (width - Math.abs(dx)) * 4;
+      for (let y = 0; y < height; y++) {
+        const from = y - dy;
+        if (from < 0 || from >= height || span <= 0) continue;
+        const start = (from * width + Math.max(0, -dx)) * 4;
+        pixels.set(before.subarray(start, start + span), (y * width + Math.max(0, dx)) * 4);
+      }
+    },
     putImageData(image, dx, dy, sx = 0, sy = 0, sw = image.width, sh = image.height) {
       const screen = screenOf(canvas);
       screen.puts++;
@@ -156,16 +186,17 @@ function section(title) {
 const wait = (ms) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 
 /**
- * Mount the app and wait until the core is up and has painted the canvas —
- * and, if given, until `ready()` holds too: restoring an autosave finishes
- * after the first paint, since IndexedDB answers asynchronously.
+ * Mount the app and wait until the core is up and has painted the canvas at
+ * the viewport's size — and, if given, until `ready()` holds too: restoring
+ * an autosave finishes later, since IndexedDB answers asynchronously.
  */
 async function mount(App, ready = () => true) {
   const root = createRoot(document.getElementById("root"));
   await act(async () => root.render(React.createElement(App)));
   for (let i = 0; i < 200; i++) {
     const canvas = document.querySelector("canvas");
-    if (canvas && screenOf(canvas).puts > 0 && ready()) break;
+    const sized = canvas?.width === VIEWPORT.width && canvas.height === VIEWPORT.height;
+    if (sized && screenOf(canvas).puts > 0 && ready()) break;
     await wait(10);
   }
   return root;
@@ -174,28 +205,41 @@ async function mount(App, ready = () => true) {
 try {
   const { App } = await server.ssrLoadModule("/src/App.tsx");
   const { EditorHandle } = await server.ssrLoadModule("/src/editor.ts");
+  const { resolveBackdrop } = await server.ssrLoadModule("/src/backdrop.ts");
 
   let root = await mount(App);
-  const surface = () => document.querySelector("figure > div");
+  const surface = () => document.querySelector("[data-viewport]");
   const canvas = () => document.querySelector("canvas");
-  // jsdom does no layout: place the artboard at the page origin.
+  // jsdom does no layout: put the viewport at the page origin.
   const place = () => {
     surface().getBoundingClientRect = () => ({
       left: 0,
       top: 0,
       x: 0,
       y: 0,
-      width: canvas().width,
-      height: canvas().height,
-      right: canvas().width,
-      bottom: canvas().height,
+      width: VIEWPORT.width,
+      height: VIEWPORT.height,
+      right: VIEWPORT.width,
+      bottom: VIEWPORT.height,
     });
   };
   place();
 
-  const pointer = (type, x, y, options = {}, target = surface()) =>
+  // The checks below speak artboard coordinates — where things are on the
+  // artboard at 100% — and these map them through whatever the view is now,
+  // as a user's eye does. Zoom and pan checks use screen points directly.
+  const view = () => surface().dataset.view.split(" ").map(Number);
+  const toScreen = (x, y) => {
+    const [zoom, panX, panY] = view();
+    return [x * zoom + panX, y * zoom + panY];
+  };
+  const fromScreen = (x, y) => {
+    const [zoom, panX, panY] = view();
+    return [(x - panX) / zoom, (y - panY) / zoom];
+  };
+  const pointerAt = (type, x, y, options = {}) =>
     act(async () => {
-      target.dispatchEvent(
+      surface().dispatchEvent(
         new window.PointerEvent(type, {
           bubbles: true,
           clientX: x,
@@ -206,14 +250,25 @@ try {
         }),
       );
     });
+  const pointer = (type, x, y, options = {}) => pointerAt(type, ...toScreen(x, y), options);
   const click = async (x, y, options = {}) => {
     await pointer("pointerdown", x, y, options);
     await pointer("pointerup", x, y, options);
   };
   const doubleClick = (x, y) =>
     act(async () => {
-      surface().dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, clientX: x, clientY: y }));
+      const [clientX, clientY] = toScreen(x, y);
+      surface().dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, clientX, clientY }));
     });
+  const wheel = async (x, y, options) => {
+    await act(async () => {
+      surface().dispatchEvent(
+        new window.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: x, clientY: y, ...options }),
+      );
+    });
+    // The canvas applies wheel input once per animation frame.
+    await wait(40);
+  };
   const drag = async (from, to, options = {}, steps = 5) => {
     await pointer("pointerdown", ...from, options);
     for (let i = 1; i <= steps; i++) {
@@ -222,17 +277,29 @@ try {
     }
     await pointer("pointerup", ...to, options);
   };
-  const key = (name, options = {}) =>
+  const key = (name, options = {}, type = "keydown") =>
     act(async () => {
-      window.dispatchEvent(new window.KeyboardEvent("keydown", { key: name, bubbles: true, ...options }));
+      window.dispatchEvent(new window.KeyboardEvent(type, { key: name, bubbles: true, ...options }));
     });
   const press = (button) => act(async () => button.click());
   const button = (label) => document.querySelector(`button[aria-label="${label}"]`);
 
-  const frame = () => document.querySelector("svg polygon")?.getAttribute("points") ?? null;
+  const screenCorners = () =>
+    document
+      .querySelector("svg polygon")
+      ?.getAttribute("points")
+      .split(" ")
+      .map((p) => p.split(",").map(Number)) ?? null;
+  /** The selection frame in artboard coordinates, as "x,y x,y x,y x,y". */
+  const frame = () =>
+    screenCorners()
+      ?.map(([x, y]) => fromScreen(x, y).map((v) => Math.round(v * 1000) / 1000).join(","))
+      .join(" ") ?? null;
   const corners = () => frame().split(" ").map((p) => p.split(",").map(Number));
+  // The selection's size label — not the artboard's, which also reads "W × H".
   const sizeLabel = () =>
-    [...surface().querySelectorAll("div")].find((d) => d.textContent.includes("×"))?.textContent ?? null;
+    [...surface().querySelectorAll("div.bg-primary")].find((d) => d.textContent.includes("×"))
+      ?.textContent ?? null;
   const status = () => document.querySelector("footer").textContent;
   const pressed = (label) => button(label)?.getAttribute("aria-pressed");
   const layerCount = () => document.querySelectorAll("aside li").length;
@@ -248,9 +315,15 @@ try {
    * draws: every changed region was redrawn in the core and put on screen.
    */
   const checkScreen = async (label) => {
+    // Let a pan settle: shifted pixels are only exact after that redraw.
+    await wait(200);
     const text = await downloadProject();
+    const [zoom, panX, panY] = view();
     const reference = await EditorHandle.create(1, 1);
     reference.loadJson(text);
+    reference.setViewport(canvas().width, canvas().height, 1);
+    reference.setView(zoom, panX, panY);
+    reference.setBackdrop(...resolveBackdrop());
     reference.render();
     const expected = reference.pixels();
     const { pixels } = screenOf(canvas());
@@ -261,7 +334,10 @@ try {
 
   section("Loading");
   check(!document.querySelector('[role="alert"]'), "the editor loads without an error banner");
-  check(screenOf(canvas()).puts === 1, "the first frame paints the canvas once, in full");
+  check(canvas().width === VIEWPORT.width, "the canvas covers the viewport, in device pixels");
+  check(view().join(" ") === "1 100 50", `the artboard is centred at 100% (${view().join(" ")})`);
+  check(!!button("Zoom 100%"), "and the status bar says so");
+  await checkScreen("on loading");
 
   section("Drawing and transforming");
   await key("r");
@@ -336,7 +412,7 @@ try {
   await key("z", { ctrlKey: true });
   check(layerCount() === 3, "one undo brings all three back");
 
-  await pointer("pointerdown", 5, 5, {}, surface().closest("figure").parentElement);
+  await click(-50, -30);
   check(!status().includes("selected"), "pressing the backdrop clears the selection");
   const rows = document.querySelectorAll("aside li");
   await act(async () => rows[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
@@ -383,7 +459,8 @@ try {
   check(status().includes("Drag points and handles"), "double-clicking a path edits its points");
   check(frame() === null && anchorMarks().length === 3, "its three points replace the frame");
   await drag([200, 300], [200, 250]);
-  const at = (y) => anchorMarks().some((r) => Math.abs(+r.getAttribute("y") + 3.5 - y) < 1e-6);
+  const at = (y) =>
+    anchorMarks().some((r) => Math.abs(fromScreen(0, +r.getAttribute("y") + 3.5)[1] - y) < 1e-6);
   check(at(250), "dragging a point moves it");
   await key("z", { ctrlKey: true });
   check(at(300) && status().includes("Drag points"), "Ctrl+Z puts it back and editing goes on");
@@ -407,6 +484,54 @@ try {
   check(layerCount() === layersNow + 1, "clicking the last point finishes an open path");
   check(!status().includes("Drag points"), "without the double-click starting an edit");
   await checkScreen("after editing points");
+
+  section("Zoom and pan");
+  await key("a", { ctrlKey: true });
+  const moved = (from, dx, dy) =>
+    screenCorners().every(([x, y], i) => Math.abs(x - from[i][0] - dx) < 1e-6 && Math.abs(y - from[i][1] - dy) < 1e-6);
+
+  let prior = screenCorners();
+  const selected = status().match(/\d+ selected/)?.[0];
+  const shiftsBefore = screenOf(canvas()).shifts;
+  await key(" ");
+  await pointerAt("pointerdown", 500, 400);
+  await pointerAt("pointermove", 520, 410);
+  await pointerAt("pointermove", 540, 425);
+  await pointerAt("pointerup", 540, 425);
+  await key(" ", {}, "keyup");
+  check(moved(prior, 40, 25), "Space-drag pans by exactly the drag");
+  check(screenOf(canvas()).shifts > shiftsBefore, "shifting the canvas's own pixels, not repainting them");
+  check(!!selected && status().includes(selected), `without touching the selection (${selected})`);
+
+  prior = screenCorners();
+  await wheel(500, 400, { deltaY: 30 });
+  check(moved(prior, 0, -30), "the wheel pans");
+  prior = screenCorners();
+  await pointerAt("pointerdown", 300, 300, { button: 1 });
+  await pointerAt("pointermove", 280, 300, { button: 1 });
+  await pointerAt("pointerup", 280, 300, { button: 1 });
+  check(moved(prior, -20, 0), "so does dragging with the middle button");
+  await checkScreen("after panning");
+
+  const [ax, ay] = screenCorners()[0];
+  await wheel(ax, ay, { deltaY: -100, ctrlKey: true });
+  const [bx, by] = screenCorners()[0];
+  check(!!button("Zoom 116%"), `Ctrl+wheel zooms in (${document.querySelector('button[aria-label^="Zoom "]').textContent})`);
+  check(Math.hypot(bx - ax, by - ay) < 1, "about the pointer: the point under it stays put");
+  await key("=", { ctrlKey: true });
+  check(!!button("Zoom 200%"), "Ctrl+= steps up to the next power of two");
+  await key("-", { ctrlKey: true });
+  check(!!button("Zoom 100%"), "Ctrl+- steps back down");
+  await key("!", { code: "Digit1", shiftKey: true });
+  const [fitZoom] = view();
+  const board = toScreen(0, 0).concat(toScreen(800, 600));
+  check(
+    fitZoom > 1 && board[0] >= 0 && board[1] >= 0 && board[2] <= VIEWPORT.width && board[3] <= VIEWPORT.height,
+    `Shift+1 fits the artboard (${Math.round(fitZoom * 100)}%)`,
+  );
+  await checkScreen("after zooming");
+  await key("0", { ctrlKey: true });
+  check(!!button("Zoom 100%"), "Ctrl+0 is 100%");
 
   section("Files");
   await press([...document.querySelectorAll("header button")].find((b) => b.textContent.includes("Export SVG")));
@@ -443,13 +568,13 @@ try {
   small.document.artboard = { width: 320, height: 200 };
   await open(new File([JSON.stringify(small)], "small.json", { type: "application/json" }));
   check(status().includes("Opened small.json"), "opening a file loads it");
-  check(canvas().width === 320 && canvas().height === 200, "the canvas takes the file's artboard size");
-  place();
+  check(status().includes("320 × 200 px"), "the file brings its artboard size");
+  check(view().join(" ") === "1 340 250", `which is fitted into the view anew (${view().join(" ")})`);
   await checkScreen("after opening a smaller artboard");
 
   await open(new File(["{ not json"], "broken.json"));
   check(!!document.querySelector('[role="alert"]'), "a broken file shows an error");
-  check(canvas().width === 320, "and leaves the document alone");
+  check(status().includes("320 × 200 px"), "and leaves the document alone");
   await press(document.querySelector('[role="alert"] button'));
   check(!document.querySelector('[role="alert"]'), "the error can be dismissed");
   await act(async () => root.unmount());

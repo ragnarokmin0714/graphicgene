@@ -8,7 +8,12 @@ export const SHIFT = isMac ? "⇧" : "Shift";
 
 export type Shortcut = {
   /** `KeyboardEvent.key`, lower-cased. */
-  key: string;
+  key?: string;
+  /**
+   * `KeyboardEvent.code`, for keys whose `key` depends on the layout and on
+   * Shift — Shift+1 is "!" on one keyboard and something else on the next.
+   */
+  code?: string;
   mod?: boolean;
   shift?: boolean;
   /** Keep firing while the key is held. Defaults to true only for modified shortcuts. */
@@ -42,7 +47,10 @@ export function useShortcuts(shortcuts: readonly Shortcut[]) {
       const key = event.key.toLowerCase();
       const hit = latest.current.find(
         (s) =>
-          s.key === key && !!s.mod === mod && !!s.shift === event.shiftKey && !event.altKey,
+          (s.key === key || (s.code !== undefined && s.code === event.code)) &&
+          !!s.mod === mod &&
+          !!s.shift === event.shiftKey &&
+          !event.altKey,
       );
       if (!hit) return;
       event.preventDefault();

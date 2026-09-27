@@ -19,7 +19,7 @@ The things anyone misses in their first five minutes.
 
 | Item | What it needs |
 |---|---|
-| **Zoom and pan, sharp on HiDPI** | A view transform from document space to device pixels. The canvas becomes the whole stage, with the artboard drawn inside it; the pixmap is sized in device pixels (zoom × `devicePixelRatio`), which also ends the upscaling blur on 2× screens. Damage rects and the overlay go through the same transform. Pick tolerances are already screen distances passed in by the shell, so they only need dividing by the zoom. |
+| ~~Zoom and pan, sharp on HiDPI~~ | **Done 2026-09-28.** `core::view` holds zoom and pan; the canvas covers the stage in device pixels; pans shift pixels and redraw only the new strip, then settle into an exact full redraw; wheel, pinch, Space-drag and middle-drag, zoom shortcuts and a zoom menu. |
 | **Properties panel** | Fill, stroke colour and width, opacity; X / Y / W / H / rotation fields. Needs `SetStroke` and `SetLocked` commands, a colour picker that converts 8-bit sRGB to the linear model, and a preview-then-commit path for continuous controls — a slider dragged across fifty values is one undo step, as a canvas drag already is. |
 | **Layer panel operations** | Rename (the first text input; shortcuts already ignore text fields), visibility and lock toggles, drag to reorder (a move command: detach plus attach in one batch), group and ungroup (baking transforms in and out). |
 | **Clipboard and duplicate** | Nodes serialized to JSON on the clipboard, pasted with fresh ids. |
@@ -65,8 +65,9 @@ Known and deliberate, roughly in the order it will start to hurt.
    `f32` linear pipeline, from a GPU renderer or an `f32` CPU backend. The
    model already allows it; the renderer does not do it.
 2. **Premultiplied pixels reach `ImageData` unconverted.** Correct while every
-   pixel is opaque, which holds because the artboard is always painted white.
-   A transparent artboard needs unpremultiplying on the way out.
+   pixel is opaque, which holds because every frame starts from the opaque
+   backdrop. A transparent backdrop or artboard needs unpremultiplying on the
+   way out.
 3. **Linear scans.** Hit-testing (after a control-box broad phase) and damage
    computation visit every node. A spatial index (R-tree or BVH) is due once
    documents reach thousands of nodes; no interface assumes the scan.
@@ -80,10 +81,14 @@ Known and deliberate, roughly in the order it will start to hurt.
    crosses the boundary as JSON, and every draw converts its path to
    tiny-skia's type. None shows in `pnpm bench` today; measure before
    changing any of them.
-7. **Anchor ids are positions.** Right for one user — path editing drops its
+7. **Zooming redraws everything.** About 19 ms a frame for a 1440×900
+   viewport at 2x with 500 shapes — roughly 50 fps. Showing a scaled copy of
+   the last frame while a zoom gesture is under way, or the GPU renderer,
+   would remove it.
+8. **Anchor ids are positions.** Right for one user — path editing drops its
    point selection when points are added or removed — but collaboration will
    need anchors with stable ids.
-8. **Open paths lose their outer end handles.** A `BezPath` has nowhere to
+9. **Open paths lose their outer end handles.** A `BezPath` has nowhere to
    keep them; it matters once paths can be continued from an end.
 
 ## Done in the 2026-09-27 architecture pass

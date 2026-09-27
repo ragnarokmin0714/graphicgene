@@ -5,9 +5,9 @@ pub mod cpu;
 pub mod renderer;
 pub mod scene;
 
-pub use cpu::{CpuRenderer, PixelRect};
+pub use cpu::{CpuRenderer, PixelRect, scroll};
 pub use renderer::Renderer;
-pub use scene::{Damage, RenderItem, RenderScene};
+pub use scene::{AA_MARGIN, Artboard, Damage, RenderItem, RenderScene, device_area};
 
 use thiserror::Error;
 

@@ -9,7 +9,7 @@
 //! CPU renderer exists partly to prove this trait is honest before the desktop
 //! and GPU work starts.
 
-use graphicgene_core::geom::Bounds;
+use graphicgene_core::geom::{Affine, Bounds};
 
 use crate::scene::RenderScene;
 
@@ -18,13 +18,15 @@ pub trait Renderer {
     type Target;
     type Error;
 
-    /// Redraw the part of `target` that `dirty` covers, from scratch: clear
-    /// it to the scene's background and draw every item reaching into it.
-    /// The rest of `target` must be left untouched — that is what makes
-    /// redrawing only what changed correct.
+    /// Redraw the part of `target` that `dirty` (device pixels) covers, from
+    /// scratch: clear it to the scene's background, draw the artboard, and
+    /// draw every item reaching into it through `view` (document to device
+    /// pixels). The rest of `target` must be left untouched — that is what
+    /// makes redrawing only what changed correct.
     fn render(
         &mut self,
         scene: &RenderScene,
+        view: Affine,
         dirty: Bounds,
         target: &mut Self::Target,
     ) -> std::result::Result<(), Self::Error>;

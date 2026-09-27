@@ -24,6 +24,7 @@ pub mod project;
 pub mod selection;
 pub mod session;
 pub mod svg;
+pub mod view;
 
 pub use color::LinearRgba;
 pub use command::{Command, Journal};

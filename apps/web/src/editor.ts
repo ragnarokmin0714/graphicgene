@@ -9,6 +9,11 @@
  *
  * It is also the batching boundary: one call per user interaction, never one
  * call per node.
+ *
+ * Positions and pick tolerances passed in are *screen* pixels — CSS pixels
+ * from the viewport's corner — and the overlay comes back in screen pixels
+ * too. The core maps them through the view (zoom and pan); nothing on this
+ * side converts coordinates.
  */
 import init, { Editor } from "./wasm/graphicgene_wasm.js";
 
@@ -26,12 +31,13 @@ export type LayerRow = {
 
 export type Rgba = [number, number, number, number];
 
-/** A document-space point. At 100% zoom, also a canvas pixel. */
+/** A point in screen pixels: CSS pixels from the viewport's top-left corner. */
 export type Point = readonly [number, number];
 
 /** The selection frame: corners go top-left, top-right, bottom-right, bottom-left, in frame terms. */
 export type Frame = {
   corners: readonly [Point, Point, Point, Point];
+  /** In document units, for the size label. */
   width: number;
   height: number;
 };
@@ -60,7 +66,7 @@ export type PathOverlay = {
 
 export type EditorMode = "pen" | "path";
 
-/** What the selection overlay draws, all in document space. */
+/** What the overlay draws, in screen pixels. */
 export type Overlay = {
   mode: EditorMode | null;
   frame: Frame | null;
@@ -73,6 +79,8 @@ export type Overlay = {
   gesture: "move" | "scale" | "rotate" | "create" | "marquee" | null;
   pen?: PenOverlay;
   path?: PathOverlay;
+  /** Where the artboard is on screen (x0, y0, x1, y1), and its size in document units. */
+  artboard: { rect: readonly [number, number, number, number]; width: number; height: number };
 };
 
 export type ShapeKind = "rect" | "ellipse";
@@ -83,8 +91,14 @@ export type PressOutcome = "drag" | "hit" | "miss";
 /** What a press while editing a path landed on. */
 export type PathPressOutcome = "handle" | "anchor" | "segment" | "miss";
 
-/** A changed area of the canvas: x, y, width, height, in pixels. */
+/** An area of the canvas: x, y, width, height, in device pixels. */
 export type PixelRect = readonly [number, number, number, number];
+
+/**
+ * How to bring the canvas up to date: shift what it shows by `shift`, then
+ * put back each of `rects` from `pixels()`. Nothing to do when both are empty.
+ */
+export type Repaint = { shift: readonly [number, number]; rects: PixelRect[] };
 
 let ready: Promise<void> | null = null;
 /** The wasm module's memory, where the canvas pixels live. */
@@ -141,7 +155,7 @@ export class EditorHandle {
 
   // Selection. Lives in the core because it drives transforms; see lib.rs.
 
-  /** `tolerance`: how far outside a shape still hits it, in document units. */
+  /** `tolerance`: how far outside a shape still hits it, in screen pixels. */
   selectAt(x: number, y: number, additive: boolean, tolerance: number): PressOutcome {
     return this.inner.selectAt(x, y, additive, tolerance) as PressOutcome;
   }
@@ -278,13 +292,83 @@ export class EditorHandle {
   }
 
   /**
-   * Bring the pixels up to date and return the area that changed; all zeros
-   * when nothing did (a selection click, a hover). Only that area was
-   * redrawn, so only that area needs putting on the canvas.
+   * Bring the pixels up to date and say how to repaint the canvas: after a
+   * pan, shift it and put back the strips that appeared; after an edit, put
+   * back the damaged area. Nothing, after a selection click or a hover.
    */
-  render(): PixelRect {
-    const [x, y, width, height] = this.inner.render();
-    return [x, y, width, height];
+  render(): Repaint {
+    const out = this.inner.render();
+    const rects: PixelRect[] = [];
+    for (let i = 0; i < out[2]; i++) {
+      const at = 3 + i * 4;
+      rects.push([out[at], out[at + 1], out[at + 2], out[at + 3]]);
+    }
+    return { shift: [out[0], out[1]], rects };
+  }
+
+  /**
+   * Call once a pan has come to rest. Shifted pixels can be a hair off along
+   * edges the old canvas edge cut; true means the next `render` redraws
+   * everything to make them exact.
+   */
+  settle(): boolean {
+    return this.inner.settle();
+  }
+
+  // The view: zoom and pan. Per-viewer, never saved; the core owns the maths.
+
+  /** The viewport in device pixels, and the device pixel ratio. The first call fits the artboard. */
+  setViewport(width: number, height: number, dpr: number): void {
+    this.inner.setViewport(width, height, dpr);
+  }
+
+  /** Screen pixels per document unit: 1 is 100%. */
+  get zoom(): number {
+    return this.inner.zoom;
+  }
+
+  /** Where the document origin is on screen, in CSS pixels. */
+  get pan(): Point {
+    return [this.inner.panX, this.inner.panY];
+  }
+
+  get dpr(): number {
+    return this.inner.dpr;
+  }
+
+  panBy(dx: number, dy: number): void {
+    this.inner.panBy(dx, dy);
+  }
+
+  /** Multiply the zoom, keeping the screen point (x, y) still. */
+  zoomBy(factor: number, x: number, y: number): void {
+    this.inner.zoomBy(factor, x, y);
+  }
+
+  zoomIn(): void {
+    this.inner.zoomIn();
+  }
+
+  zoomOut(): void {
+    this.inner.zoomOut();
+  }
+
+  /** 1 is 100%. Around the viewport's centre. */
+  zoomTo(zoom: number): void {
+    this.inner.zoomTo(zoom);
+  }
+
+  zoomToFit(): void {
+    this.inner.zoomToFit();
+  }
+
+  setView(zoom: number, panX: number, panY: number): void {
+    this.inner.setView(zoom, panX, panY);
+  }
+
+  /** The colour around the artboard, as sRGB bytes. */
+  setBackdrop(r: number, g: number, b: number): void {
+    this.inner.setBackdrop(r, g, b);
   }
 
   private view: Uint8ClampedArray<ArrayBuffer> | null = null;
@@ -296,8 +380,8 @@ export class EditorHandle {
    *
    * The bytes are premultiplied RGBA, and ImageData expects straight alpha.
    * The two are identical while every pixel is opaque, which holds because
-   * the artboard is always painted white first. A transparent artboard would
-   * have to unpremultiply here.
+   * every frame starts from the opaque backdrop. A transparent backdrop or
+   * artboard would have to unpremultiply here.
    */
   pixels(): Uint8ClampedArray<ArrayBuffer> {
     if (!memory) throw new Error("wasm core is not loaded");
@@ -343,16 +427,18 @@ export class EditorHandle {
     return this.inner.exportSvg();
   }
 
-  /**
-   * The artboard's size in pixels, which the canvas must match. It belongs to
-   * the document, so it can change when a different one is loaded.
-   */
+  /** The canvas's size in device pixels: the viewport, which its backing store must match. */
   get width(): number {
     return this.inner.width;
   }
 
   get height(): number {
     return this.inner.height;
+  }
+
+  /** The artboard's size in document units. It belongs to the document. */
+  get artboard(): { width: number; height: number } {
+    return { width: this.inner.artboardWidth, height: this.inner.artboardHeight };
   }
 
   /** A press is in progress and the document holds a preview: do not save now. */

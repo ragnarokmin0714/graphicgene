@@ -16,15 +16,23 @@ use graphicgene_core::color::LinearRgba;
 use graphicgene_core::doc::{Changes, Document};
 use graphicgene_core::error::Result;
 use graphicgene_core::geom::{
-    Affine, BezPath, Bounds, Shape, empty_bounds, is_empty_bounds, union,
+    Affine, BezPath, Bounds, Rect, Shape, empty_bounds, is_empty_bounds, union,
 };
 use graphicgene_core::node::{BlendMode, NodeId, NodeKind, Stroke, VectorNode};
 
-/// Antialiasing touches up to a pixel beyond a shape's geometric edge.
-const AA_MARGIN: f64 = 1.0;
+/// Antialiasing touches up to a pixel beyond a shape's edge — a *device*
+/// pixel, whatever the zoom, which is why it is added after the view
+/// transform (`device_area`) and not to the document-space bounds.
+pub const AA_MARGIN: f64 = 1.0;
 /// How far a stroke can reach past its path, in stroke widths: half the
 /// width, times the renderer's miter limit of 4 for sharp corners.
 const STROKE_REACH: f64 = 2.0;
+
+/// The device pixels a document-space area can touch once drawn through
+/// `view` (document to device): what to cull against and what to redraw.
+pub fn device_area(view: Affine, area: Bounds) -> Bounds {
+    view.transform_rect_bbox(area).inflate(AA_MARGIN, AA_MARGIN)
+}
 
 /// One drawable, with its world transform and accumulated opacity baked in.
 #[derive(Debug, Clone)]
@@ -36,17 +44,27 @@ pub struct RenderItem {
     pub stroke: Option<Stroke>,
     pub opacity: f32,
     pub blend_mode: BlendMode,
-    /// World-space bounds of every pixel this item can touch — stroke and
-    /// antialiasing included — used for culling and for damage.
+    /// Document-space bounds of everything this item draws, stroke
+    /// included; `device_area` adds the antialiasing margin.
     pub bounds: Bounds,
+}
+
+/// The page the artwork sits on, drawn under it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Artboard {
+    pub rect: Rect,
+    pub fill: LinearRgba,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct RenderScene {
     /// Back to front.
     pub items: Vec<RenderItem>,
-    /// What the canvas is cleared to before drawing. `None` is transparent.
+    /// What the canvas is cleared to before drawing — the backdrop around
+    /// the artboard. `None` is transparent.
     pub background: Option<LinearRgba>,
+    /// Taken from the document on every rebuild.
+    pub artboard: Option<Artboard>,
     /// Where each vector node's item is in `items`.
     index: HashMap<NodeId, usize>,
 }
@@ -56,7 +74,8 @@ pub struct RenderScene {
 pub enum Damage {
     /// Nothing on screen changed.
     None,
-    /// Only this world-space area needs redrawing.
+    /// Only this document-space area needs redrawing; map it with
+    /// `device_area`.
     Region(Bounds),
     /// Redraw everything.
     Everything,
@@ -109,6 +128,11 @@ impl RenderScene {
     fn rebuild(&mut self, doc: &Document) -> Result<()> {
         self.items.clear();
         self.index.clear();
+        let size = doc.artboard();
+        self.artboard = Some(Artboard {
+            rect: Rect::new(0.0, 0.0, size.width, size.height),
+            fill: LinearRgba::WHITE,
+        });
         self.visit(doc, doc.root(), Affine::IDENTITY, 1.0)
     }
 
@@ -203,9 +227,7 @@ fn item(
 ) -> RenderItem {
     let reach = vector.stroke.map_or(0.0, |s| s.width * STROKE_REACH);
     let local = vector.path.bounding_box().inflate(reach, reach);
-    let bounds = transform
-        .transform_rect_bbox(local)
-        .inflate(AA_MARGIN, AA_MARGIN);
+    let bounds = transform.transform_rect_bbox(local);
     RenderItem {
         node,
         transform,

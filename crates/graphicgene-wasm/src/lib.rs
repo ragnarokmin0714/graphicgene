@@ -6,13 +6,20 @@
 //! the fine-grained shape.
 //!
 //! Nothing here decides how editing behaves; that is all in the session, so
-//! a desktop shell gets the same rules for free. What lives here is only what
-//! is specific to JavaScript: node ids as strings, colours as sRGB bytes,
-//! results as JSON, and the pixel buffer the canvas is painted from.
+//! a desktop shell gets the same rules for free. What lives here is what is
+//! specific to this shell: node ids as strings, colours as sRGB bytes,
+//! results as JSON, the view the canvas shows, and the pixels it is painted
+//! from.
 //!
-//! Pixels never cross the boundary by copy. `render` redraws only what
-//! changed and says where; the page reads that part in place from wasm
-//! memory through `pixelsPtr`.
+//! **The page speaks screen pixels.** Every pointer position and pick
+//! tolerance arrives in CSS pixels from the viewport's corner and is mapped
+//! into the document here, through the view; the overlay goes back out in
+//! screen pixels too. The page never converts coordinates itself.
+//!
+//! **Pixels never cross the boundary by copy.** `render` redraws only what
+//! changed — shifting what it already has when the view only panned — and
+//! says where; the page reads those parts in place from wasm memory through
+//! `pixelsPtr`.
 
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::Command;
@@ -21,7 +28,10 @@ use graphicgene_core::gesture::{Modifiers, ShapeKind, TransformKind};
 use graphicgene_core::node::{Node, NodeId, Stroke};
 use graphicgene_core::path_edit::PressOutcome;
 use graphicgene_core::session::{Mode, Overlay, SelectOutcome, Session};
-use graphicgene_render::{CpuRenderer, Damage, PixelRect, RenderScene, Renderer};
+use graphicgene_core::view::{MAX_ZOOM, View};
+use graphicgene_render::{
+    CpuRenderer, Damage, PixelRect, RenderScene, Renderer, device_area, scroll,
+};
 use serde_json::{Value, json};
 use slotmap::{Key, KeyData};
 use tiny_skia::Pixmap;
@@ -29,14 +39,34 @@ use wasm_bindgen::prelude::*;
 
 /// Stroke width for paths drawn with the pen, in document units.
 const PEN_STROKE_WIDTH: f64 = 2.0;
+/// Room left around the artboard when fitting it into the viewport, in
+/// screen pixels.
+const FIT_PADDING: f64 = 48.0;
+/// The backdrop until the page sets its theme's: the light one.
+const DEFAULT_BACKDROP: [u8; 3] = [235, 235, 235];
 
 /// Everything the UI talks to.
 #[wasm_bindgen]
 pub struct Editor {
     session: Session,
     renderer: CpuRenderer,
+    /// The viewport's pixels, in device pixels.
     pixmap: Pixmap,
     scene: RenderScene,
+    view: View,
+    /// The view the pixels were drawn for; `None` when they are not valid.
+    shown: Option<View>,
+    /// Whether every pixel is what a full redraw would give. Shifting pixels
+    /// for a pan leaves edges the old canvas edge cut a hair off, until
+    /// `settle` has them redrawn.
+    exact: bool,
+    /// Whether the page has sized the viewport. Until it does, the viewport
+    /// is the artboard at 100% — which is how tests and headless uses see a
+    /// document.
+    shell_viewport: bool,
+    /// Fit the artboard into the viewport at the next chance: a new or a
+    /// freshly loaded document.
+    fit_pending: bool,
 }
 
 #[wasm_bindgen]
@@ -46,17 +76,24 @@ impl Editor {
     #[wasm_bindgen(constructor)]
     pub fn new(width: u32, height: u32) -> Result<Editor, JsError> {
         let session = Session::with_artboard(Size::new(width.into(), height.into()));
+        let view = View::new(width, height, 1.0);
         let mut scene = RenderScene::default();
-        scene.background = Some(LinearRgba::WHITE);
+        let [r, g, b] = DEFAULT_BACKDROP;
+        scene.background = Some(LinearRgba::from_srgb8(r, g, b, 255));
         Ok(Editor {
-            pixmap: pixmap_for(&session)?,
+            pixmap: pixmap_for(&view)?,
             session,
             renderer: CpuRenderer::new(),
             scene,
+            view,
+            shown: None,
+            exact: true,
+            shell_viewport: false,
+            fit_pending: true,
         })
     }
 
-    /// The artboard's width in pixels: the size the canvas must be.
+    /// The canvas's width in device pixels: its backing store must match.
     #[wasm_bindgen(getter)]
     pub fn width(&self) -> u32 {
         self.pixmap.width()
@@ -65,6 +102,107 @@ impl Editor {
     #[wasm_bindgen(getter)]
     pub fn height(&self) -> u32 {
         self.pixmap.height()
+    }
+
+    /// The artboard's size in document units.
+    #[wasm_bindgen(getter, js_name = artboardWidth)]
+    pub fn artboard_width(&self) -> f64 {
+        self.session.document().artboard().width
+    }
+
+    #[wasm_bindgen(getter, js_name = artboardHeight)]
+    pub fn artboard_height(&self) -> f64 {
+        self.session.document().artboard().height
+    }
+
+    // ---- The view ------------------------------------------------------------------
+
+    /// The viewport's size in device pixels, and the device pixel ratio. The
+    /// first call also fits the artboard into it.
+    #[wasm_bindgen(js_name = setViewport)]
+    pub fn set_viewport(&mut self, width: u32, height: u32, dpr: f64) -> Result<(), JsError> {
+        self.shell_viewport = true;
+        self.view.resize(width, height, dpr);
+        if self.fit_pending {
+            self.fit(1.0);
+        }
+        self.sync_pixmap()
+    }
+
+    /// Screen pixels per document unit.
+    #[wasm_bindgen(getter)]
+    pub fn zoom(&self) -> f64 {
+        self.view.zoom()
+    }
+
+    /// Where the document origin is on screen, in CSS pixels.
+    #[wasm_bindgen(getter, js_name = panX)]
+    pub fn pan_x(&self) -> f64 {
+        self.view.pan().x
+    }
+
+    #[wasm_bindgen(getter, js_name = panY)]
+    pub fn pan_y(&self) -> f64 {
+        self.view.pan().y
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn dpr(&self) -> f64 {
+        self.view.dpr()
+    }
+
+    /// Move the picture by a screen-space offset.
+    #[wasm_bindgen(js_name = panBy)]
+    pub fn pan_by(&mut self, dx: f64, dy: f64) {
+        self.view.pan_by(Vec2::new(dx, dy));
+    }
+
+    /// Multiply the zoom by `factor`, keeping the screen point (x, y) still.
+    #[wasm_bindgen(js_name = zoomBy)]
+    pub fn zoom_by(&mut self, factor: f64, x: f64, y: f64) {
+        self.view.zoom_by(factor, Point::new(x, y));
+    }
+
+    /// The next power-of-two zoom up, around the viewport's centre.
+    #[wasm_bindgen(js_name = zoomIn)]
+    pub fn zoom_in(&mut self) {
+        let centre = self.centre();
+        self.view.zoom_in(centre);
+    }
+
+    #[wasm_bindgen(js_name = zoomOut)]
+    pub fn zoom_out(&mut self) {
+        let centre = self.centre();
+        self.view.zoom_out(centre);
+    }
+
+    /// Set the zoom, around the viewport's centre.
+    #[wasm_bindgen(js_name = zoomTo)]
+    pub fn zoom_to(&mut self, zoom: f64) {
+        let centre = self.centre();
+        self.view.zoom_to(zoom, centre);
+    }
+
+    /// Show the whole artboard, as large as it fits.
+    #[wasm_bindgen(js_name = zoomToFit)]
+    pub fn zoom_to_fit(&mut self) {
+        self.fit(MAX_ZOOM);
+    }
+
+    /// Set zoom and pan exactly, as when restoring a view.
+    #[wasm_bindgen(js_name = setView)]
+    pub fn set_view(&mut self, zoom: f64, pan_x: f64, pan_y: f64) {
+        self.view.set(zoom, Vec2::new(pan_x, pan_y));
+    }
+
+    /// The colour around the artboard, as sRGB bytes — the theme's backdrop.
+    #[wasm_bindgen(js_name = setBackdrop)]
+    pub fn set_backdrop(&mut self, r: u8, g: u8, b: u8) {
+        let colour = Some(LinearRgba::from_srgb8(r, g, b, 255));
+        if self.scene.background != colour {
+            self.scene.background = colour;
+            self.shown = None;
+        }
     }
 
     // ---- Document and history ------------------------------------------------
@@ -146,16 +284,23 @@ impl Editor {
         self.session.save().map_err(to_js)
     }
 
-    /// Replace the document. Its artboard may be a different size, so read
-    /// `width` and `height` again afterwards.
+    /// Replace the document and fit its artboard into the viewport. Read
+    /// `width`, `height` and the artboard size again afterwards.
     #[wasm_bindgen(js_name = loadJson)]
     pub fn load_json(&mut self, text: &str) -> Result<(), JsError> {
         self.session.load(text).map_err(to_js)?;
-        let pixmap = pixmap_for(&self.session)?;
-        if (pixmap.width(), pixmap.height()) != (self.pixmap.width(), self.pixmap.height()) {
-            self.pixmap = pixmap;
+        self.fit_pending = true;
+        if self.shell_viewport {
+            self.fit(1.0);
+        } else {
+            let artboard = self.session.document().artboard();
+            self.view = View::new(
+                artboard.width.ceil() as u32,
+                artboard.height.ceil() as u32,
+                1.0,
+            );
         }
-        Ok(())
+        self.sync_pixmap()
     }
 
     /// The artwork as SVG, the size of the artboard.
@@ -166,36 +311,76 @@ impl Editor {
 
     // ---- Pixels ------------------------------------------------------------------
 
-    /// Bring the pixels up to date and return the area that changed, as
-    /// `[x, y, width, height]` in pixels — all zeros when nothing did, as
-    /// after a selection click or a hover.
+    /// Bring the pixels up to date. Returns, as a flat list of device pixels:
+    /// `[dx, dy, n, x, y, width, height, …]` — first shift the canvas by
+    /// (dx, dy), then put back the `n` rects that follow. `[0, 0, 0]` means
+    /// nothing changed, as after a selection click or a hover.
     ///
-    /// Only that area is redrawn. Read the pixels in place with `pixelsPtr`.
-    pub fn render(&mut self) -> Result<Vec<u32>, JsError> {
+    /// Read the pixels in place with `pixelsPtr`.
+    pub fn render(&mut self) -> Result<Vec<i32>, JsError> {
         let changes = self.session.prepare_render().map_err(to_js)?;
         let damage = self
             .scene
             .update(self.session.document(), &changes)
             .map_err(to_js)?;
         let (width, height) = (self.pixmap.width(), self.pixmap.height());
-        let dirty = match damage {
-            Damage::None => return Ok(vec![0; 4]),
-            Damage::Region(region) => region,
-            Damage::Everything => Rect::new(0.0, 0.0, width.into(), height.into()),
-        };
-        self.renderer
-            .render(&self.scene, dirty, &mut self.pixmap)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(match PixelRect::covering(dirty, width, height) {
-            Some(rect) => vec![rect.x, rect.y, rect.width, rect.height],
-            None => vec![0; 4],
-        })
+        let device = self.view.to_device();
+
+        let mut everything = damage == Damage::Everything;
+        let mut shift = (0, 0);
+        let mut dirty = Vec::new();
+        match self.shown.map(|shown| self.view.scroll_from(&shown)) {
+            None | Some(None) => everything = true,
+            Some(Some((0, 0))) => {}
+            Some(Some((dx, dy))) if dx.unsigned_abs() >= width || dy.unsigned_abs() >= height => {
+                everything = true;
+            }
+            Some(Some((dx, dy))) => {
+                let strips = scroll(&mut self.pixmap, dx, dy);
+                dirty.extend(strips.into_iter().map(PixelRect::bounds));
+                shift = (dx, dy);
+                self.exact = false;
+            }
+        }
+        if let Damage::Region(region) = damage {
+            dirty.push(device_area(device, region));
+        }
+        if everything {
+            dirty = vec![Rect::new(0.0, 0.0, width.into(), height.into())];
+            shift = (0, 0);
+            self.exact = true;
+        }
+
+        let mut out = vec![shift.0, shift.1, 0];
+        for area in dirty {
+            let Some(rect) = PixelRect::covering(area, width, height) else {
+                continue;
+            };
+            self.renderer
+                .render(&self.scene, device, rect.bounds(), &mut self.pixmap)
+                .map_err(|e| JsError::new(&e.to_string()))?;
+            out.extend([rect.x, rect.y, rect.width, rect.height].map(|v| v as i32));
+        }
+        out[2] = ((out.len() - 3) / 4) as i32;
+        self.shown = Some(self.view);
+        Ok(out)
+    }
+
+    /// Call once a pan has come to rest. Returns whether the pixels need a
+    /// full redraw to be exact again; if so, the next `render` does it.
+    pub fn settle(&mut self) -> bool {
+        if self.exact {
+            return false;
+        }
+        self.shown = None;
+        true
     }
 
     /// Where the canvas pixels start in wasm memory: `width * height * 4`
-    /// bytes of RGBA, premultiplied. The same address until the artboard
-    /// changes size; the page must still rebuild its view whenever wasm
-    /// memory grows, which detaches the old buffer.
+    /// bytes of RGBA, premultiplied — and opaque, since the backdrop is. The
+    /// same address until the viewport changes size; the page must still
+    /// rebuild its view whenever wasm memory grows, which detaches the old
+    /// buffer.
     #[wasm_bindgen(js_name = pixelsPtr)]
     pub fn pixels_ptr(&self) -> *const u8 {
         self.pixmap.data().as_ptr()
@@ -240,6 +425,9 @@ impl Editor {
     }
 
     // ---- Selection ---------------------------------------------------------------
+    //
+    // From here on, (x, y) is a screen point and `tolerance` a screen
+    // distance, both in CSS pixels.
 
     /// A click with the select tool: "drag" (follow with `beginMove`), "hit"
     /// (Shift deselected a node; do nothing) or "miss" (follow with
@@ -254,7 +442,7 @@ impl Editor {
     ) -> Result<String, JsError> {
         let outcome = self
             .session
-            .select_at(Point::new(x, y), additive, tolerance)
+            .select_at(self.point(x, y), additive, self.distance(tolerance))
             .map_err(to_js)?;
         Ok(match outcome {
             SelectOutcome::Drag => "drag",
@@ -289,7 +477,7 @@ impl Editor {
     /// Track the node under the pointer; true if that changed.
     pub fn hover(&mut self, x: f64, y: f64, tolerance: f64) -> Result<bool, JsError> {
         self.session
-            .hover(Point::new(x, y), tolerance)
+            .hover(self.point(x, y), self.distance(tolerance))
             .map_err(to_js)
     }
 
@@ -304,7 +492,8 @@ impl Editor {
         self.session.delete_selection().map_err(to_js)
     }
 
-    /// Move the selection (or selected anchors) by (dx, dy), as one undo step.
+    /// Move the selection (or selected anchors) by (dx, dy) *document units*,
+    /// as one undo step — a nudge is a unit whatever the zoom.
     pub fn nudge(&mut self, dx: f64, dy: f64) -> Result<bool, JsError> {
         self.session.nudge(Vec2::new(dx, dy)).map_err(to_js)
     }
@@ -314,7 +503,7 @@ impl Editor {
     #[wasm_bindgen(js_name = beginMove)]
     pub fn begin_move(&mut self, x: f64, y: f64) -> Result<bool, JsError> {
         self.session
-            .begin_transform(TransformKind::Move, Point::new(x, y))
+            .begin_transform(TransformKind::Move, self.point(x, y))
             .map_err(to_js)
     }
 
@@ -322,14 +511,14 @@ impl Editor {
     #[wasm_bindgen(js_name = beginScale)]
     pub fn begin_scale(&mut self, u: f64, v: f64, x: f64, y: f64) -> Result<bool, JsError> {
         self.session
-            .begin_transform(TransformKind::Scale { u, v }, Point::new(x, y))
+            .begin_transform(TransformKind::Scale { u, v }, self.point(x, y))
             .map_err(to_js)
     }
 
     #[wasm_bindgen(js_name = beginRotate)]
     pub fn begin_rotate(&mut self, x: f64, y: f64) -> Result<bool, JsError> {
         self.session
-            .begin_transform(TransformKind::Rotate, Point::new(x, y))
+            .begin_transform(TransformKind::Rotate, self.point(x, y))
             .map_err(to_js)
     }
 
@@ -348,14 +537,14 @@ impl Editor {
             other => return Err(JsError::new(&format!("unknown shape {other:?}"))),
         };
         self.session
-            .begin_create(shape, colour(srgb)?, Point::new(x, y))
+            .begin_create(shape, colour(srgb)?, self.point(x, y))
             .map_err(to_js)
     }
 
     #[wasm_bindgen(js_name = beginMarquee)]
     pub fn begin_marquee(&mut self, x: f64, y: f64, additive: bool) -> Result<(), JsError> {
         self.session
-            .begin_marquee(Point::new(x, y), additive)
+            .begin_marquee(self.point(x, y), additive)
             .map_err(to_js)
     }
 
@@ -368,7 +557,7 @@ impl Editor {
         alt: bool,
     ) -> Result<(), JsError> {
         self.session
-            .update_gesture(Point::new(x, y), Modifiers { shift, alt })
+            .update_gesture(self.point(x, y), Modifiers { shift, alt })
             .map_err(to_js)
     }
 
@@ -384,9 +573,6 @@ impl Editor {
     }
 
     // ---- Pen and path editing ------------------------------------------------------
-    //
-    // `tolerance` is a pick distance in document units: a screen distance the
-    // UI divides by the zoom, like its handle sizes.
 
     /// A press with the pen tool. The first press starts a new path.
     #[wasm_bindgen(js_name = penPress)]
@@ -403,14 +589,14 @@ impl Editor {
             width: PEN_STROKE_WIDTH,
         };
         self.session
-            .pen_press(Point::new(x, y), shift, tolerance, stroke)
+            .pen_press(self.point(x, y), shift, self.distance(tolerance), stroke)
             .map_err(to_js)
     }
 
     #[wasm_bindgen(js_name = penDrag)]
     pub fn pen_drag(&mut self, x: f64, y: f64, shift: bool) -> Result<(), JsError> {
         self.session
-            .pen_drag(Point::new(x, y), shift)
+            .pen_drag(self.point(x, y), shift)
             .map_err(to_js)
     }
 
@@ -422,7 +608,8 @@ impl Editor {
 
     #[wasm_bindgen(js_name = penHover)]
     pub fn pen_hover(&mut self, x: f64, y: f64, tolerance: f64) -> bool {
-        self.session.pen_hover(Point::new(x, y), tolerance)
+        let (point, tolerance) = (self.point(x, y), self.distance(tolerance));
+        self.session.pen_hover(point, tolerance)
     }
 
     #[wasm_bindgen(js_name = penFinish)]
@@ -457,7 +644,7 @@ impl Editor {
     ) -> Result<String, JsError> {
         let outcome = self
             .session
-            .path_press(Point::new(x, y), tolerance, additive)
+            .path_press(self.point(x, y), self.distance(tolerance), additive)
             .map_err(to_js)?;
         Ok(match outcome {
             PressOutcome::Handle => "handle",
@@ -471,7 +658,7 @@ impl Editor {
     #[wasm_bindgen(js_name = pathDrag)]
     pub fn path_drag(&mut self, x: f64, y: f64, shift: bool, alt: bool) -> Result<(), JsError> {
         self.session
-            .path_drag(Point::new(x, y), Modifiers { shift, alt })
+            .path_drag(self.point(x, y), Modifiers { shift, alt })
             .map_err(to_js)
     }
 
@@ -489,17 +676,20 @@ impl Editor {
     #[wasm_bindgen(js_name = pathDoubleClick)]
     pub fn path_double_click(&mut self, x: f64, y: f64, tolerance: f64) -> Result<bool, JsError> {
         self.session
-            .path_double_click(Point::new(x, y), tolerance)
+            .path_double_click(self.point(x, y), self.distance(tolerance))
             .map_err(to_js)
     }
 
     // ---- Overlay -------------------------------------------------------------------
 
-    /// Everything drawn over the artwork, as JSON, in document units. One
-    /// call per frame, not one per node.
+    /// Everything drawn over the artwork, as JSON, in screen pixels — plus
+    /// the artboard's place on screen. Sizes a label shows (frame width and
+    /// height, the artboard's size) stay in document units. One call per
+    /// frame, not one per node.
     pub fn overlay(&self) -> Result<String, JsError> {
         let overlay = self.session.overlay().map_err(to_js)?;
-        to_json(&overlay_json(&overlay))
+        let artboard = self.session.document().artboard();
+        to_json(&overlay_json(&overlay, self.view.to_screen(), artboard))
     }
 }
 
@@ -516,11 +706,57 @@ impl Editor {
         }
         Ok(id)
     }
+
+    /// A screen point, in the document.
+    fn point(&self, x: f64, y: f64) -> Point {
+        self.view.screen_to_document(Point::new(x, y))
+    }
+
+    /// A screen distance, in document units.
+    fn distance(&self, screen: f64) -> f64 {
+        self.view.screen_distance_to_document(screen)
+    }
+
+    fn centre(&self) -> Point {
+        let size = self.view.screen_size();
+        Point::new(size.width / 2.0, size.height / 2.0)
+    }
+
+    fn fit(&mut self, max_zoom: f64) {
+        let artboard = self.session.document().artboard();
+        let area = Rect::new(0.0, 0.0, artboard.width, artboard.height);
+        self.view.fit(area, FIT_PADDING, max_zoom);
+        self.fit_pending = false;
+    }
+
+    /// Match the pixmap to the viewport, dropping the pixels if it changes.
+    fn sync_pixmap(&mut self) -> Result<(), JsError> {
+        if (self.pixmap.width(), self.pixmap.height()) != self.view.device_size() {
+            self.pixmap = pixmap_for(&self.view)?;
+            self.shown = None;
+        }
+        Ok(())
+    }
 }
 
-fn overlay_json(overlay: &Overlay) -> Value {
-    let point = |p: Point| [p.x, p.y];
-    let line = |(a, b): &(Point, Point)| [a.x, a.y, b.x, b.y];
+fn overlay_json(overlay: &Overlay, to_screen: Affine, artboard: Size) -> Value {
+    let point = |p: Point| {
+        let s = to_screen * p;
+        [s.x, s.y]
+    };
+    let line = |&(a, b): &(Point, Point)| {
+        let (a, b) = (to_screen * a, to_screen * b);
+        [a.x, a.y, b.x, b.y]
+    };
+    let path = |p: &BezPath| {
+        let mut p = p.clone();
+        p.apply_affine(to_screen);
+        p.to_svg()
+    };
+    let rect = |r: Rect| {
+        let r = to_screen.transform_rect_bbox(r);
+        [r.x0, r.y0, r.x1, r.y1]
+    };
     let frame = overlay.frame.map(|frame| {
         let (width, height) = frame.size();
         json!({
@@ -532,27 +768,32 @@ fn overlay_json(overlay: &Overlay) -> Value {
     let mut value = json!({
         "mode": overlay.mode.map(mode_name),
         "frame": frame,
-        "outlines": overlay.outlines.iter().map(BezPath::to_svg).collect::<Vec<_>>(),
-        "hover": overlay.hover.as_ref().map(BezPath::to_svg),
-        "marquee": overlay.marquee.map(|r| [r.x0, r.y0, r.x1, r.y1]),
+        "outlines": overlay.outlines.iter().map(path).collect::<Vec<_>>(),
+        "hover": overlay.hover.as_ref().map(path),
+        "marquee": overlay.marquee.map(rect),
         "gesture": overlay.gesture,
+        "artboard": {
+            "rect": rect(Rect::new(0.0, 0.0, artboard.width, artboard.height)),
+            "width": artboard.width,
+            "height": artboard.height,
+        },
     });
     if let Some(pen) = &overlay.pen {
         value["pen"] = json!({
             "anchors": pen.anchors.iter().copied().map(point).collect::<Vec<_>>(),
             "handles": pen.handles.iter().map(line).collect::<Vec<_>>(),
-            "preview": pen.preview.as_ref().map(BezPath::to_svg),
+            "preview": pen.preview.as_ref().map(path),
             "closable": pen.closable,
         });
     }
-    if let Some(path) = &overlay.path {
+    if let Some(edit) = &overlay.path {
         value["path"] = json!({
-            "outline": path.outline.to_svg(),
-            "anchors": path.anchors.iter().map(|&(at, selected)| json!({
+            "outline": path(&edit.outline),
+            "anchors": edit.anchors.iter().map(|&(at, selected)| json!({
                 "at": point(at),
                 "selected": selected,
             })).collect::<Vec<_>>(),
-            "handles": path.handles.iter().map(line).collect::<Vec<_>>(),
+            "handles": edit.handles.iter().map(line).collect::<Vec<_>>(),
         });
     }
     value
@@ -565,11 +806,10 @@ fn mode_name(mode: Mode) -> &'static str {
     }
 }
 
-/// A pixmap covering the artboard at one pixel per document unit.
-fn pixmap_for(session: &Session) -> Result<Pixmap, JsError> {
-    let size = session.document().artboard();
-    Pixmap::new(size.width.ceil() as u32, size.height.ceil() as u32)
-        .ok_or_else(|| JsError::new("invalid artboard size"))
+/// A pixmap covering the viewport in device pixels.
+fn pixmap_for(view: &View) -> Result<Pixmap, JsError> {
+    let (width, height) = view.device_size();
+    Pixmap::new(width, height).ok_or_else(|| JsError::new("invalid viewport size"))
 }
 
 fn colour(srgb: &[u8]) -> Result<LinearRgba, JsError> {

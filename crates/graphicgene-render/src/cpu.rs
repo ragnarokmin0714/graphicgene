@@ -20,14 +20,15 @@
 //! allocates nothing here once warmed up.
 
 use graphicgene_core::color::LinearRgba;
-use graphicgene_core::geom::{Bounds, PathEl};
+use graphicgene_core::geom::{Affine, Bounds, PathEl};
 use tiny_skia::{
-    Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Stroke as SkStroke, Transform,
+    Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Rect as SkRect, Stroke as SkStroke,
+    Transform,
 };
 
 use crate::RenderError;
 use crate::renderer::Renderer;
-use crate::scene::{RenderItem, RenderScene};
+use crate::scene::{RenderItem, RenderScene, device_area};
 
 #[derive(Debug, Default)]
 pub struct CpuRenderer {
@@ -92,11 +93,13 @@ impl Renderer for CpuRenderer {
     type Error = RenderError;
 
     /// Redraw the part of `target` that `dirty` touches, from scratch: it is
-    /// cleared to the scene's background, then every item that reaches it is
-    /// drawn, back to front. Pixels outside it are left alone.
+    /// cleared to the scene's background, then the artboard and every item
+    /// that reaches it are drawn through `view`, back to front. Pixels
+    /// outside it are left alone.
     fn render(
         &mut self,
         scene: &RenderScene,
+        view: Affine,
         dirty: Bounds,
         target: &mut Pixmap,
     ) -> Result<(), RenderError> {
@@ -118,9 +121,7 @@ impl Renderer for CpuRenderer {
             let whole = Bounds::new(0.0, 0.0, f64::from(width), f64::from(height));
             target.fill(background);
             let mut canvas = target.as_mut();
-            for item in scene.items.iter().filter(|i| intersects(i.bounds, whole)) {
-                draw(&mut self.builder, item, &mut canvas);
-            }
+            draw_scene(&mut self.builder, scene, view, whole, &mut canvas);
             return Ok(());
         }
 
@@ -143,9 +144,7 @@ impl Renderer for CpuRenderer {
         {
             let mut canvas = PixmapMut::from_bytes(&mut self.scratch[..len], width, height)
                 .ok_or(RenderError::BadTargetSize { width, height })?;
-            for item in scene.items.iter().filter(|i| intersects(i.bounds, area)) {
-                draw(&mut self.builder, item, &mut canvas);
-            }
+            draw_scene(&mut self.builder, scene, view, area, &mut canvas);
         }
 
         let data = target.data_mut();
@@ -157,7 +156,126 @@ impl Renderer for CpuRenderer {
     }
 }
 
-fn draw(builder: &mut PathBuilder, item: &RenderItem, canvas: &mut PixmapMut) {
+/// Everything reaching into `area` (device pixels), back to front: the
+/// artboard, then the items, all drawn through `view`.
+fn draw_scene(
+    builder: &mut PathBuilder,
+    scene: &RenderScene,
+    view: Affine,
+    area: Bounds,
+    canvas: &mut PixmapMut,
+) {
+    if let Some(artboard) = scene.artboard
+        && intersects(device_area(view, artboard.rect), area)
+    {
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Default::default()
+        };
+        paint.set_color(to_sk_color(artboard.fill, 1.0));
+        let [_, b, c, ..] = view.as_coeffs();
+        if b == 0.0 && c == 0.0 {
+            // An unrotated view keeps the artboard a device-space rect, so
+            // only its overlap with `area` is filled: the scratch buffer is
+            // full-size, and filling the whole page for every small redraw
+            // cost more than the redraw. `area`'s edges sit on whole pixels,
+            // so cutting there changes no pixel's coverage.
+            let page = view.transform_rect_bbox(artboard.rect).intersect(area);
+            if let Some(rect) = SkRect::from_ltrb(
+                page.x0 as f32,
+                page.y0 as f32,
+                page.x1 as f32,
+                page.y1 as f32,
+            ) {
+                canvas.fill_rect(rect, &paint, Transform::identity(), None);
+            }
+        } else if let Some(rect) = SkRect::from_ltrb(
+            artboard.rect.x0 as f32,
+            artboard.rect.y0 as f32,
+            artboard.rect.x1 as f32,
+            artboard.rect.y1 as f32,
+        ) {
+            canvas.fill_rect(rect, &paint, to_sk_transform(view), None);
+        }
+    }
+    for item in &scene.items {
+        if intersects(device_area(view, item.bounds), area) {
+            draw(builder, item, view, canvas);
+        }
+    }
+}
+
+/// Shift `target`'s pixels by (`dx`, `dy`) — what a pan does to a picture
+/// that has not otherwise changed — and return the strips left uncovered,
+/// which the caller must redraw. A shift of a whole dimension or more leaves
+/// nothing to reuse, and returns the whole target.
+pub fn scroll(target: &mut Pixmap, dx: i32, dy: i32) -> Vec<PixelRect> {
+    let (width, height) = (target.width() as i32, target.height() as i32);
+    if dx.abs() >= width || dy.abs() >= height {
+        let whole = Bounds::new(0.0, 0.0, f64::from(width), f64::from(height));
+        return PixelRect::covering(whole, width as u32, height as u32)
+            .into_iter()
+            .collect();
+    }
+    let stride = width as usize * 4;
+    let span = (width - dx.abs()) as usize * 4;
+    let (from_x, to_x) = if dx >= 0 {
+        (0, dx as usize * 4)
+    } else {
+        (dx.unsigned_abs() as usize * 4, 0)
+    };
+    let data = target.data_mut();
+    let mut copy_row = |y: i32| {
+        let source = y - dy;
+        if (0..height).contains(&source) {
+            let from = source as usize * stride + from_x;
+            data.copy_within(from..from + span, y as usize * stride + to_x);
+        }
+    };
+    // Walk the rows against the direction of travel, so none is overwritten
+    // before it has been copied.
+    if dy > 0 {
+        (0..height).rev().for_each(&mut copy_row);
+    } else {
+        (0..height).for_each(&mut copy_row);
+    }
+
+    let (w, h) = (width as u32, height as u32);
+    let mut exposed = Vec::with_capacity(2);
+    match dy.signum() {
+        1 => exposed.push(PixelRect {
+            x: 0,
+            y: 0,
+            width: w,
+            height: dy as u32,
+        }),
+        -1 => exposed.push(PixelRect {
+            x: 0,
+            y: (height + dy) as u32,
+            width: w,
+            height: dy.unsigned_abs(),
+        }),
+        _ => {}
+    }
+    match dx.signum() {
+        1 => exposed.push(PixelRect {
+            x: 0,
+            y: 0,
+            width: dx as u32,
+            height: h,
+        }),
+        -1 => exposed.push(PixelRect {
+            x: (width + dx) as u32,
+            y: 0,
+            width: dx.unsigned_abs(),
+            height: h,
+        }),
+        _ => {}
+    }
+    exposed
+}
+
+fn draw(builder: &mut PathBuilder, item: &RenderItem, view: Affine, canvas: &mut PixmapMut) {
     let mut path = std::mem::take(builder);
     append_path(&mut path, &item.path);
     let Some(path) = path.finish() else {
@@ -165,8 +283,9 @@ fn draw(builder: &mut PathBuilder, item: &RenderItem, canvas: &mut PixmapMut) {
         return;
     };
 
-    let [a, b, c, d, e, f] = item.transform.as_coeffs().map(|v| v as f32);
-    let transform = Transform::from_row(a, b, c, d, e, f);
+    // Composed in f64 before narrowing, so zooming does not compound the
+    // f32 rounding of two separate transforms.
+    let transform = to_sk_transform(view * item.transform);
 
     if let Some(fill) = item.fill {
         let mut paint = Paint {
@@ -191,6 +310,11 @@ fn draw(builder: &mut PathBuilder, item: &RenderItem, canvas: &mut PixmapMut) {
     }
 
     *builder = path.clear();
+}
+
+fn to_sk_transform(affine: Affine) -> Transform {
+    let [a, b, c, d, e, f] = affine.as_coeffs().map(|v| v as f32);
+    Transform::from_row(a, b, c, d, e, f)
 }
 
 /// tiny-skia works in 8-bit sRGB; the document works in linear f32.

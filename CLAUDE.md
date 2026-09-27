@@ -19,18 +19,22 @@ browser pass over everything since 2026-09-25 (below) and the Pages deploy.
 
 An architecture pass followed on 2026-09-27: the editing session moved from
 the wasm crate into core, rendering became incremental with zero-copy pixels,
-and the artboard size became document state. What is next, and the known
-architectural debt, is in `ROADMAP.md`.
+and the artboard size became document state. v0.2 work started on 2026-09-28
+with zoom and pan: the canvas now covers the whole stage in device pixels, so
+it is sharp on HiDPI screens. What is next, and the known architectural debt,
+is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 81 tests, including a randomized check that
-  incremental redraws equal full redraws pixel for pixel
+- `cargo test --workspace` — 93 tests, including a randomized check that
+  incremental redraws equal full redraws pixel for pixel, through a zoomed
+  view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 77 checks,
-  including that the canvas equals a full redraw of the same document
+- `pnpm ui` — the React app driven in jsdom against the real core: 94 checks,
+  including zoom and pan, and that the canvas equals a full redraw of the
+  same document at the same view
 
 Anything on a per-frame path also gets `pnpm bench` before and after; see
 Performance rules.
@@ -166,10 +170,12 @@ selection. It takes typed arguments in document space.
 A platform shell — `graphicgene-wasm` today, a Tauri app later — only
 translates: ids to strings, pointer positions to document points, results to
 JSON and pixels. **A rule written in a shell is a rule the two apps will
-disagree on**, and one only JS can test. Pick tolerances look like shell
-logic but are not: they are screen distances divided by the zoom, which only
-the shell knows, so the shell measures them and passes them in — the rules
-that use them stay in core.
+disagree on**, and one only JS can test.
+
+The page speaks **screen pixels** (CSS pixels from the viewport's corner) to
+the wasm shell — pointer positions, pick tolerances — and the shell maps them
+into the document through the view, dividing tolerances by the zoom; the
+overlay comes back in screen pixels. The page never converts coordinates.
 
 The web shell still decides which core API a press goes to (`Stage.tsx`:
 tool → pen, path edit or gesture). A native UI would need that routing too;
@@ -188,8 +194,12 @@ React must never hold authoritative document state — the moment it does, the w
 and desktop apps drift apart and the core stops being the product.
 
 That includes the artboard: its size is `Document::artboard`, saved in the
-file, and the web app reads it from the core (`editor.width` / `height`).
-The 800 × 600 in `App.tsx` only seeds a brand-new document.
+file, and the web app reads it from the core (`editor.artboard`). The
+800 × 600 in `App.tsx` only seeds a brand-new document.
+
+The view — zoom and pan — is per-viewer state like the selection: never
+saved, never undone. Its maths is `graphicgene_core::view` (zoom about a
+point, fit, pan kept on whole device pixels) and the wasm shell holds one.
 
 What React does keep is view state — the active tool, the theme, status-bar
 messages — plus caches of core data keyed on a version the core hands out
@@ -220,14 +230,15 @@ Theme is a per-viewer preference, not document state: `useTheme.ts` keeps it
 in React and localStorage, and an inline script in `index.html` applies it
 before first paint. Keep the two in sync. Keyboard shortcuts go through
 `useShortcuts` in `shortcuts.ts`, which already skips text fields — do not add
-ad-hoc `keydown` listeners. The one exception is `Stage.tsx` tracking Shift
-and Alt during a drag, which re-applies a constraint rather than running a
-command.
+ad-hoc `keydown` listeners. The exceptions are in `Stage.tsx` and change what
+a drag does rather than run a command: Shift and Alt during a drag, and Space
+held for panning. The backdrop colour reaches the core from the
+`--canvas-backdrop` token (`backdrop.ts`), re-read when the theme changes.
 
 Selection handles are the one place geometry is split: the core reports the
-selection frame's corners (`overlay()`), and `handles.ts` places handles and
-hit-tests them, because handle size and grab distance are screen
-measurements that must not scale with zoom.
+selection frame's corners in screen pixels (`overlay()`), and `handles.ts`
+places handles and hit-tests them there, because handle size and grab
+distance are screen measurements that must not scale with zoom.
 
 `--canvas-backdrop` is deliberately not `--background`: artwork has to be judged
 against a neutral field, not against the UI's tint.
@@ -329,11 +340,17 @@ ambiguous between the two projects.
 - No allocation in per-frame paths. The scene is updated in place from the
   change log and rebuilt only when the tree's shape changes. Known exceptions:
   each refreshed item clones its path, and the overlay crosses as JSON.
-- Pixels never cross the wasm boundary by copy. `render()` returns the changed
-  rect; the page reads the pixels in place from wasm memory
-  (`EditorHandle.pixels()`) and blits only that rect. They are premultiplied
-  RGBA, which equals the straight alpha `ImageData` expects only while every
-  pixel is opaque — true while the artboard is painted white.
+- Pixels never cross the wasm boundary by copy. `render()` returns what to
+  repaint; the page reads the pixels in place from wasm memory
+  (`EditorHandle.pixels()`) and puts back only those rects. They are
+  premultiplied RGBA, which equals the straight alpha `ImageData` expects
+  only while every pixel is opaque — true because every frame starts from the
+  opaque backdrop.
+- A pan does not redraw: the pixels shift by whole device pixels (the view
+  keeps the pan there) and only the uncovered strips are drawn; the canvas
+  shifts itself the same way with `drawImage`. Edges the old canvas edge cut
+  can come out a hair off, so once a pan pauses the page calls `settle()` and
+  the next frame redraws in full. A zoom always redraws in full.
 - Views cache core data on versions (`layersVersion`) that hold still through
   a drag, so a drag does not rebuild the layer panel every frame.
 - No `Box<dyn ..>` in hot loops.
@@ -353,17 +370,19 @@ changes; the 2026-09-27 column is before incremental rendering.
 | Scenario | 2026-09-27 before | now |
 |---|---|---|
 | drag one shape (update + pixels to canvas) | 9.36 ms | 0.11 ms |
-| drag everything (worst case: all damaged) | — | 9.2 ms |
+| drag everything (worst case: all damaged) | — | 9.1 ms |
 | frame with nothing changed (selection, hover) | 9.31 ms | 0.001 ms |
 | hover hit-test | 0.097 ms | 0.011 ms |
-| read the layer rows | 0.62 ms, twice a frame | 0.68 ms, only when they change |
+| read the layer rows | 0.62 ms, twice a frame | 0.69 ms, only when they change |
+| pan, 1440×900 viewport at 2x (shift + strip) | — | 0.69 ms |
+| zoom, same viewport (full redraw) | — | 19 ms |
 
 Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 769 KB | 299 KB |
-| js (React + Radix + app) | 392 KB | 126 KB |
+| wasm (wasm-opt applied) | 789 KB | 308 KB |
+| js (React + Radix + app) | 399 KB | 128 KB |
 | css (incl. tw-animate-css) | 39 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |
 

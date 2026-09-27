@@ -168,19 +168,23 @@ const wide = new Editor(120, 40);
 wide.addRect(0, 0, 10, 10, RED);
 const resized = new Editor(W, H);
 resized.loadJson(wide.toJson());
-assert.deepEqual([resized.width, resized.height], [120, 40], "loading adopts the file's artboard");
+assert.deepEqual([resized.artboardWidth, resized.artboardHeight], [120, 40], "loading adopts the file's artboard");
+// With no viewport from a page, the canvas is the artboard at 100%.
+assert.deepEqual([resized.width, resized.height], [120, 40], "headless, the canvas follows the artboard");
 assert.equal(draw(resized).length, 120 * 40 * 4, "and renders at that size");
 
 // Only what changed is redrawn, and the result matches a full redraw.
 const partial = new Editor(200, 200);
 const moving = partial.addRect(10, 10, 10, 10, RED);
 partial.addRect(100, 100, 30, 30, RED);
-assert.deepEqual(Array.from(partial.render()), [0, 0, 200, 200], "the first frame is everything");
-assert.deepEqual(Array.from(partial.render()), [0, 0, 0, 0], "an unchanged frame redraws nothing");
+// render() says: shift by (dx, dy), then put back n rects.
+assert.deepEqual(Array.from(partial.render()), [0, 0, 1, 0, 0, 200, 200], "the first frame is everything");
+assert.deepEqual(Array.from(partial.render()), [0, 0, 0], "an unchanged frame redraws nothing");
 partial.selectLayer(moving, false);
-assert.deepEqual(Array.from(partial.render()), [0, 0, 0, 0], "selection is not pixels");
+assert.deepEqual(Array.from(partial.render()), [0, 0, 0], "selection is not pixels");
 partial.setTransform(moving, new Float64Array([1, 0, 0, 1, 6, 0]));
-const [, , dw, dh] = partial.render();
+const [, , count, , , dw, dh] = partial.render();
+assert.equal(count, 1);
 assert.ok(dw > 0 && dw < 30 && dh > 0 && dh < 20, `a small move redraws a small area, got ${dw}x${dh}`);
 const fresh = new Editor(200, 200);
 fresh.loadJson(partial.toJson());
@@ -194,5 +198,42 @@ for (let i = 0; i < 5; i++) {
 // slotmap keeps vacated slots (as null) so ids keep their versions; count the live ones.
 const saved = JSON.parse(bloated.toJson()).document.nodes.filter((slot) => slot.value !== null);
 assert.equal(saved.length, 1, "undone inserts are not saved, only the root");
+
+// The view: a page sets the viewport, and the artboard is fitted into it.
+const BACKDROP = [235, 235, 235, 255];
+const viewed = new Editor(64, 64);
+viewed.addRect(0, 0, 20, 20, RED);
+viewed.setViewport(128, 128, 1);
+assert.equal(viewed.zoom, 0.5, "a 64px board fits a 128px viewport with 48px of padding at 50%");
+assert.deepEqual([viewed.panX, viewed.panY], [48, 48], "centred");
+const at = (editor, x, y) => pixel128(editor.pixelBytes(), x, y);
+const pixel128 = (data, x, y) => Array.from(data.slice((y * 128 + x) * 4, (y * 128 + x) * 4 + 4));
+viewed.render();
+assert.deepEqual(at(viewed, 50, 50), [255, 0, 0, 255], "the rect, drawn through the view");
+assert.deepEqual(at(viewed, 5, 5), BACKDROP, "the backdrop around the artboard");
+assert.deepEqual(at(viewed, 70, 70), WHITE, "the artboard beyond the rect");
+
+// Pointer input is in screen pixels: a click on the rect's screen position.
+assert.equal(viewed.selectAt(52, 52, false, 4), "drag", "screen points are mapped into the document");
+
+// A pan shifts the pixels it has and redraws only the strip it uncovers.
+viewed.panBy(10, 0);
+const panned = Array.from(viewed.render());
+assert.deepEqual(panned.slice(0, 3), [10, 0, 1], "a pan is a shift plus one strip");
+assert.deepEqual(panned.slice(3), [0, 0, 10, 128], "the strip on the left");
+assert.deepEqual(at(viewed, 60, 50), [255, 0, 0, 255], "the rect moved with the view");
+assert.equal(viewed.settle(), true, "shifted pixels ask for a redraw once the pan settles");
+assert.deepEqual(Array.from(viewed.render()).slice(0, 7), [0, 0, 1, 0, 0, 128, 128]);
+assert.equal(viewed.settle(), false, "and then they are exact");
+
+// A zoom cannot reuse pixels: it redraws everything.
+viewed.zoomBy(2, 64, 64);
+assert.deepEqual(Array.from(viewed.render()).slice(0, 7), [0, 0, 1, 0, 0, 128, 128]);
+const reference = new Editor(1, 1);
+reference.loadJson(viewed.toJson());
+reference.setViewport(128, 128, 1);
+reference.setView(viewed.zoom, viewed.panX, viewed.panY);
+reference.render();
+assert.deepEqual(viewed.pixelBytes(), reference.pixelBytes(), "the same view draws the same pixels");
 
 console.log("smoke: ok");

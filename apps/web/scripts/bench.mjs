@@ -10,6 +10,9 @@
  *             bring the pixels up to date, and move them to a canvas
  *   drag all — the same with every node selected: the worst case, where
  *             the damaged area is the whole artboard
+ *   pan     — one frame of panning a 1440×900 viewport on a 2x screen: the
+ *             canvas shifts its pixels and only the uncovered strip is drawn
+ *   zoom    — one frame of zooming it: nothing to reuse, a full redraw
  *   idle    — the same frame when nothing changed (a selection click, say)
  *   hover   — one hover hit-test as the pointer crosses the artboard
  *   layers  — reading the layer panel's rows
@@ -53,26 +56,28 @@ function populate(editor) {
 }
 
 /**
- * One frame as Canvas.tsx does it: ask the core for pixels and hand them to
- * the canvas. putImageData's own copy is stood in for by copying the same
- * bytes into a reused buffer, so builds that copy less are credited for it.
+ * One frame as Canvas.tsx does it: bring the pixels up to date, then put the
+ * reported rects on the canvas, read in place from wasm memory. putImageData's
+ * own copy is stood in for by copying the same rows into a buffer the size
+ * of the canvas; the canvas shifting itself on a pan is the browser's work
+ * and is not counted.
  */
-const canvasBuffer = new Uint8ClampedArray(W * H * 4);
+const canvasBuffers = new Map();
 function frame(editor) {
-  if (typeof editor.pixelsPtr === "function") {
-    // Zero-copy build: render() returns the changed region [x, y, w, h];
-    // the pixels are read in place from wasm memory.
-    const [x, y, w, h] = editor.render();
-    if (w === 0 || h === 0) return;
-    const view = new Uint8ClampedArray(wasm.memory.buffer, editor.pixelsPtr(), W * H * 4);
+  const out = editor.render();
+  const count = out[2];
+  if (count === 0) return;
+  const { width, height } = editor;
+  const key = `${width}x${height}`;
+  if (!canvasBuffers.has(key)) canvasBuffers.set(key, new Uint8ClampedArray(width * height * 4));
+  const canvas = canvasBuffers.get(key);
+  const pixels = new Uint8ClampedArray(wasm.memory.buffer, editor.pixelsPtr(), width * height * 4);
+  for (let i = 0; i < count; i++) {
+    const [x, y, w, h] = out.slice(3 + i * 4, 7 + i * 4);
     for (let row = y; row < y + h; row++) {
-      const start = (row * W + x) * 4;
-      canvasBuffer.set(view.subarray(start, start + w * 4), start);
+      const start = (row * width + x) * 4;
+      canvas.set(pixels.subarray(start, start + w * 4), start);
     }
-  } else {
-    const bytes = editor.render();
-    const image = new Uint8ClampedArray(bytes);
-    canvasBuffer.set(image);
   }
 }
 
@@ -134,6 +139,24 @@ results.push(
 );
 
 results.push(measure("layer rows", 120, () => JSON.parse(editor.layerTree())));
+
+// A real viewport on a HiDPI screen: 1440×900 CSS pixels at 2x.
+const big = new Editor(W, H);
+populate(big);
+big.setViewport(2880, 1800, 2);
+for (let i = 0; i < 5; i++) frame(big);
+results.push(
+  measure("pan @2x (shift + strip)", 240, (i) => {
+    big.panBy(i % 2 ? 3 : -2, 1);
+    frame(big);
+  }),
+);
+results.push(
+  measure("zoom @2x (full redraw)", 60, (i) => {
+    big.zoomBy(i % 2 ? 1.02 : 1 / 1.02, 720, 450);
+    frame(big);
+  }),
+);
 
 editor.selectLayer(target, false);
 results.push(measure("overlay", 240, () => JSON.parse(editor.overlay())));

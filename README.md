@@ -10,10 +10,11 @@ them.
 
 **Try it:** <https://ragnarokmin0714.github.io/graphicgene/>
 
-> **Status: v0.1 preview.** Draw rectangles, ellipses and bezier paths;
-> select, move, scale and rotate them; edit any path point by point; undo
-> everything. Work autosaves in the browser, project files can be downloaded
-> and reopened, and the artwork exports as SVG. What comes next is in
+> **Status: v0.1 preview, v0.2 under way.** Draw rectangles, ellipses and
+> bezier paths; select, move, scale and rotate them; edit any path point by
+> point; zoom and pan, sharp on HiDPI screens; undo everything. Work
+> autosaves in the browser, project files can be downloaded and reopened,
+> and the artwork exports as SVG. What comes next is in
 > [`ROADMAP.md`](ROADMAP.md).
 
 ## Using it
@@ -26,6 +27,9 @@ them.
 | Double-click a path | Edit its points: drag points and handles, click a segment to add a point, double-click a point for corner/curve |
 | Handles on a selection | Scale (`Shift` keeps proportions, `Alt` from the centre); just outside a corner rotates (`Shift` snaps to 15°) |
 | Arrow keys | Nudge 1px, 10px with `Shift` |
+| Scroll, `Space`+drag, middle-drag | Pan |
+| `Ctrl/⌘`+scroll, pinch | Zoom about the pointer |
+| `Ctrl/⌘ +` `−` `0`, `Shift 1` | Zoom in, out, to 100%, to fit the artboard |
 | `Ctrl/⌘ Z`, `Ctrl/⌘ Shift Z` | Undo, redo |
 | `Ctrl/⌘ O`, `Ctrl/⌘ Shift E` | Open a project file, export SVG |
 
@@ -51,7 +55,8 @@ commands back. A desktop shell would drive the same session.
 
 Only what changes is redrawn, and pixels never cross the wasm boundary by
 copy. With 500 shapes on the artboard, a frame of dragging one of them costs
-about 0.1 ms of work in the core.
+about 0.1 ms of work in the core, and panning a 1440×900 view on a 2× screen
+about 0.7 ms — a pan shifts the pixels it already has.
 
 [`CLAUDE.md`](CLAUDE.md) records the decisions behind all this — which are
 load-bearing, and why — and is worth reading before changing anything
