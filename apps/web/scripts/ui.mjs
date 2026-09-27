@@ -1,0 +1,461 @@
+/**
+ * Browser-free UI check.
+ *
+ * Drives the real App — React, the wasm core, autosave — in jsdom with
+ * synthetic pointer and keyboard events, and asserts on what a user would
+ * see: the overlay, the layer panel, the status bar, the canvas pixels,
+ * downloads and IndexedDB.
+ *
+ * Neither this box nor CI has a browser engine; this is what stands in for
+ * one. It cannot see real layout and CSS, pointer capture, focus, IME, or
+ * how anything actually looks. Those still need a person with a browser.
+ *
+ * Run with: pnpm --filter @graphicgene/web ui   (after pnpm build:wasm)
+ */
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { JSDOM } from "jsdom";
+
+// ---- A browser, as far as the app can tell ------------------------------------
+
+const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+  pretendToBeVisual: true,
+  url: "http://localhost/",
+});
+const { window } = dom;
+const define = (key, value) =>
+  Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+for (const key of [
+  "window",
+  "document",
+  "Node",
+  "Element",
+  "HTMLElement",
+  "HTMLInputElement",
+  "HTMLCanvasElement",
+  "SVGElement",
+  "Event",
+  "MouseEvent",
+  "PointerEvent",
+  "KeyboardEvent",
+  "FocusEvent",
+  "DOMRect",
+  "MutationObserver",
+  "getComputedStyle",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+  "localStorage",
+]) {
+  define(key, key === "window" ? window : window[key]);
+}
+define("IS_REACT_ACT_ENVIRONMENT", true);
+
+// What jsdom leaves out.
+window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+define("matchMedia", window.matchMedia);
+class NoResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+define("ResizeObserver", NoResizeObserver);
+window.ResizeObserver = NoResizeObserver;
+Object.assign(window.Element.prototype, {
+  setPointerCapture() {},
+  releasePointerCapture() {},
+  hasPointerCapture: () => false,
+});
+
+// IndexedDB. With `window` defined, fake-indexeddb installs onto it.
+await import("fake-indexeddb/auto");
+define("indexedDB", window.indexedDB ?? globalThis.indexedDB);
+define("IDBKeyRange", window.IDBKeyRange ?? globalThis.IDBKeyRange);
+
+// Downloads: capture the blob instead of navigating.
+const downloads = [];
+URL.createObjectURL = (blob) => {
+  downloads.push(blob);
+  return "blob:captured";
+};
+URL.revokeObjectURL = () => {};
+window.HTMLAnchorElement.prototype.click = function () {
+  downloads.at(-1).filename = this.download;
+};
+
+// The canvas: a 2D context whose putImageData copies into a "screen" buffer,
+// cleared whenever the element changes size, as a real one is.
+class ImageData {
+  constructor(data, width, height) {
+    if (data.length !== width * height * 4) throw new RangeError("ImageData size mismatch");
+    Object.assign(this, { data, width, height });
+  }
+}
+define("ImageData", ImageData);
+const screens = new WeakMap();
+function screenOf(canvas) {
+  let screen = screens.get(canvas);
+  if (!screen || screen.width !== canvas.width || screen.height !== canvas.height) {
+    screen = {
+      width: canvas.width,
+      height: canvas.height,
+      pixels: new Uint8ClampedArray(canvas.width * canvas.height * 4),
+      puts: 0,
+      partialPuts: 0,
+    };
+    screens.set(canvas, screen);
+  }
+  return screen;
+}
+window.HTMLCanvasElement.prototype.getContext = function () {
+  const canvas = this;
+  return {
+    putImageData(image, dx, dy, sx = 0, sy = 0, sw = image.width, sh = image.height) {
+      const screen = screenOf(canvas);
+      screen.puts++;
+      if (sw < image.width || sh < image.height) screen.partialPuts++;
+      for (let y = sy; y < sy + sh; y++) {
+        const from = (y * image.width + sx) * 4;
+        screen.pixels.set(image.data.subarray(from, from + sw * 4), ((dy + y) * screen.width + dx + sx) * 4);
+      }
+    },
+  };
+};
+
+// The wasm module is fetched from a file: URL, which Node's fetch refuses.
+const nodeFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (!url.startsWith("file:")) return nodeFetch(input, init);
+  return new Response(await readFile(fileURLToPath(url)), {
+    headers: { "content-type": "application/wasm" },
+  });
+};
+
+// ---- The app ------------------------------------------------------------------
+
+const { createServer } = await import("vite");
+const server = await createServer({
+  root: fileURLToPath(new URL("..", import.meta.url)),
+  server: { middlewareMode: true },
+  appType: "custom",
+  logLevel: "error",
+});
+const { default: React } = await import("react");
+const { createRoot } = await import("react-dom/client");
+const { act } = React;
+
+let failures = 0;
+function check(ok, label) {
+  console.log(`${ok ? "ok  " : "FAIL"} ${label}`);
+  if (!ok) failures++;
+}
+function section(title) {
+  console.log(`\n# ${title}`);
+}
+
+const wait = (ms) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+
+/**
+ * Mount the app and wait until the core is up and has painted the canvas —
+ * and, if given, until `ready()` holds too: restoring an autosave finishes
+ * after the first paint, since IndexedDB answers asynchronously.
+ */
+async function mount(App, ready = () => true) {
+  const root = createRoot(document.getElementById("root"));
+  await act(async () => root.render(React.createElement(App)));
+  for (let i = 0; i < 200; i++) {
+    const canvas = document.querySelector("canvas");
+    if (canvas && screenOf(canvas).puts > 0 && ready()) break;
+    await wait(10);
+  }
+  return root;
+}
+
+try {
+  const { App } = await server.ssrLoadModule("/src/App.tsx");
+  const { EditorHandle } = await server.ssrLoadModule("/src/editor.ts");
+
+  let root = await mount(App);
+  const surface = () => document.querySelector("figure > div");
+  const canvas = () => document.querySelector("canvas");
+  // jsdom does no layout: place the artboard at the page origin.
+  const place = () => {
+    surface().getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      x: 0,
+      y: 0,
+      width: canvas().width,
+      height: canvas().height,
+      right: canvas().width,
+      bottom: canvas().height,
+    });
+  };
+  place();
+
+  const pointer = (type, x, y, options = {}, target = surface()) =>
+    act(async () => {
+      target.dispatchEvent(
+        new window.PointerEvent(type, {
+          bubbles: true,
+          clientX: x,
+          clientY: y,
+          button: 0,
+          pointerId: 1,
+          ...options,
+        }),
+      );
+    });
+  const click = async (x, y, options = {}) => {
+    await pointer("pointerdown", x, y, options);
+    await pointer("pointerup", x, y, options);
+  };
+  const doubleClick = (x, y) =>
+    act(async () => {
+      surface().dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, clientX: x, clientY: y }));
+    });
+  const drag = async (from, to, options = {}, steps = 5) => {
+    await pointer("pointerdown", ...from, options);
+    for (let i = 1; i <= steps; i++) {
+      const at = [0, 1].map((k) => from[k] + ((to[k] - from[k]) * i) / steps);
+      await pointer("pointermove", ...at, options);
+    }
+    await pointer("pointerup", ...to, options);
+  };
+  const key = (name, options = {}) =>
+    act(async () => {
+      window.dispatchEvent(new window.KeyboardEvent("keydown", { key: name, bubbles: true, ...options }));
+    });
+  const press = (button) => act(async () => button.click());
+  const button = (label) => document.querySelector(`button[aria-label="${label}"]`);
+
+  const frame = () => document.querySelector("svg polygon")?.getAttribute("points") ?? null;
+  const corners = () => frame().split(" ").map((p) => p.split(",").map(Number));
+  const sizeLabel = () =>
+    [...surface().querySelectorAll("div")].find((d) => d.textContent.includes("×"))?.textContent ?? null;
+  const status = () => document.querySelector("footer").textContent;
+  const pressed = (label) => button(label)?.getAttribute("aria-pressed");
+  const layerCount = () => document.querySelectorAll("aside li").length;
+  const anchorMarks = () => [...surface().querySelectorAll('svg rect[width="7"]')];
+
+  const downloadProject = async () => {
+    await press(button("Download project file"));
+    return downloads.at(-1).text();
+  };
+
+  /**
+   * The canvas must show exactly what a full redraw of the same document
+   * draws: every changed region was redrawn in the core and put on screen.
+   */
+  const checkScreen = async (label) => {
+    const text = await downloadProject();
+    const reference = await EditorHandle.create(1, 1);
+    reference.loadJson(text);
+    reference.render();
+    const expected = reference.pixels();
+    const { pixels } = screenOf(canvas());
+    let differing = 0;
+    for (let i = 0; i < expected.length; i++) if (pixels[i] !== expected[i]) differing++;
+    check(differing === 0, `${label}: the canvas matches a full redraw (${differing} bytes differ)`);
+  };
+
+  section("Loading");
+  check(!document.querySelector('[role="alert"]'), "the editor loads without an error banner");
+  check(screenOf(canvas()).puts === 1, "the first frame paints the canvas once, in full");
+
+  section("Drawing and transforming");
+  await key("r");
+  check(pressed("Rectangle") === "true", "R picks the rectangle tool");
+  await drag([100, 100], [300, 200]);
+  check(layerCount() === 1, "dragging draws one shape");
+  check(pressed("Select") === "true", "the tool hands back to Select");
+  check(status().includes("1 selected"), "the new shape is selected");
+  check(frame() === "100,100 300,100 300,200 100,200", `its frame is the drawn rect (${frame()})`);
+  check(sizeLabel() === "200 × 100", `the size label reads 200 × 100 (${sizeLabel()})`);
+  check(surface().querySelectorAll("svg rect").length === 8, "a large frame has 8 handles");
+  check(document.querySelector("aside li")?.dataset.selected !== undefined, "its layer row is highlighted");
+
+  await drag([200, 150], [250, 180]);
+  check(frame() === "150,130 350,130 350,230 150,230", `dragging the body moves it (${frame()})`);
+  await key("z", { ctrlKey: true });
+  check(frame() === "100,100 300,100 300,200 100,200", "one Ctrl+Z undoes the whole drag");
+  await key("z", { ctrlKey: true, shiftKey: true });
+  check(frame() === "150,130 350,130 350,230 150,230", "Ctrl+Shift+Z redoes it");
+  await checkScreen("after a drag, undo and redo");
+  check(screenOf(canvas()).partialPuts > 0, "drags repaint only the area that changed");
+
+  await drag([350, 230], [400, 280]);
+  check(sizeLabel() === "250 × 150", `the corner handle scales (${sizeLabel()})`);
+  check(frame()?.startsWith("150,130 "), "about the opposite corner");
+  await drag([400, 280], [500, 300], { shiftKey: true });
+  const [w, h] = sizeLabel().split(" × ").map(Number);
+  check(Math.abs(w / h - 250 / 150) < 0.01, `Shift keeps the proportions (${sizeLabel()})`);
+  await key("z", { ctrlKey: true });
+
+  await drag([408, 122], [430, 200]);
+  const tilted = corners();
+  check(Math.abs(tilted[0][1] - tilted[1][1]) > 1, "just outside a corner rotates");
+  check(sizeLabel() === "250 × 150", `rotation keeps the size (${sizeLabel()})`);
+  await checkScreen("after scaling and rotating");
+
+  section("Selecting");
+  const putsBefore = screenOf(canvas()).puts;
+  await key("Escape");
+  check(frame() === null && !status().includes("selected"), "Escape clears the selection");
+  check(screenOf(canvas()).puts === putsBefore, "which repaints no pixels: selection is overlay only");
+  await pointer("pointermove", 275, 205);
+  check(!!surface().querySelector('svg path[stroke-width="1.5"]'), "hovering a shape outlines it");
+  await pointer("pointermove", 780, 580);
+  check(!surface().querySelector('svg path[stroke-width="1.5"]'), "the outline goes when the pointer leaves it");
+
+  await pointer("pointerdown", 780, 580);
+  await pointer("pointermove", 500, 400);
+  check(!!surface().querySelector("svg rect.fill-primary\\/8"), "sweeping from empty space draws a marquee");
+  await pointer("pointermove", 260, 200);
+  await pointer("pointerup", 260, 200);
+  check(status().includes("1 selected"), "the marquee selects what it touches");
+
+  const before = corners();
+  await key("ArrowRight", { shiftKey: true });
+  check(Math.abs(corners()[0][0] - before[0][0] - 10) < 1e-6, "Shift+Arrow nudges 10px");
+
+  await press(button("Ellipse"));
+  check(pressed("Ellipse") === "true", "the dock picks the ellipse tool");
+  await click(600, 50);
+  check(layerCount() === 2 && sizeLabel() === "100 × 100", `a click places a 100 × 100 ellipse (${sizeLabel()})`);
+  await key("r");
+  await drag([50, 400], [130, 450], { shiftKey: true });
+  check(sizeLabel() === "80 × 80", `Shift draws a square (${sizeLabel()})`);
+
+  await key("a", { ctrlKey: true });
+  check(status().includes("3 selected"), "Ctrl+A selects everything");
+  check(surface().querySelectorAll('svg path[stroke-width="1"]').length === 3, "each selected node is outlined");
+  await key("Delete");
+  check(layerCount() === 0, "Delete removes the selection");
+  await checkScreen("after deleting everything");
+  await key("z", { ctrlKey: true });
+  check(layerCount() === 3, "one undo brings all three back");
+
+  await pointer("pointerdown", 5, 5, {}, surface().closest("figure").parentElement);
+  check(!status().includes("selected"), "pressing the backdrop clears the selection");
+  const rows = document.querySelectorAll("aside li");
+  await act(async () => rows[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
+  await act(async () => rows[1].dispatchEvent(new window.MouseEvent("click", { bubbles: true, shiftKey: true })));
+  check(status().includes("2 selected"), "layer rows select, and Shift adds");
+
+  const settled = frame();
+  const settledStatus = status();
+  await pointer("pointerdown", 650, 100);
+  await pointer("pointermove", 700, 500);
+  const midDrag = frame();
+  await key("Escape");
+  await pointer("pointerup", 700, 500);
+  check(midDrag !== settled && frame() === settled, "Escape during a drag puts things back");
+  check(status() === settledStatus, "and keeps the selection");
+  await key("z", { ctrlKey: true });
+  check(layerCount() === 2, "the cancelled drag left nothing in the history");
+  await checkScreen("after a cancelled drag and an undo");
+
+  section("Pen");
+  await key("Escape");
+  await key("Escape");
+  const layersBefore = layerCount();
+  await key("p");
+  check(pressed("Pen") === "true", "P picks the pen");
+  check(status().includes("Click to add a point"), "a hint says how to start");
+  await click(100, 300);
+  await click(200, 300);
+  check(status().includes("Click the first point to close"), "another says how to finish");
+  await drag([250, 380], [280, 380], {}, 2);
+  check(surface().querySelectorAll("svg line").length === 2, "dragging a point pulls out both handles");
+  await pointer("pointermove", 180, 250);
+  check(!!surface().querySelector('svg path[stroke-width="1"]'), "a preview segment follows the pointer");
+  await pointer("pointermove", 101, 301);
+  check(!!surface().querySelector('svg circle[r="7"]'), "hovering the first point offers to close");
+  await click(101, 301);
+  check(layerCount() === layersBefore + 1, "closing adds one path");
+  check(pressed("Select") === "true" && status().includes("1 selected"), "which is selected, with Select back");
+  await checkScreen("after drawing a pen path");
+
+  section("Editing points");
+  await click(150, 300);
+  await doubleClick(150, 300);
+  check(status().includes("Drag points and handles"), "double-clicking a path edits its points");
+  check(frame() === null && anchorMarks().length === 3, "its three points replace the frame");
+  await drag([200, 300], [200, 250]);
+  const at = (y) => anchorMarks().some((r) => Math.abs(+r.getAttribute("y") + 3.5 - y) < 1e-6);
+  check(at(250), "dragging a point moves it");
+  await key("z", { ctrlKey: true });
+  check(at(300) && status().includes("Drag points"), "Ctrl+Z puts it back and editing goes on");
+  await click(150, 300);
+  check(anchorMarks().length === 4, "clicking a segment adds a point");
+  await key("Delete");
+  check(anchorMarks().length === 3, "Delete removes it");
+  await key("Enter");
+  check(!status().includes("Drag points") && !!frame(), "Enter finishes editing");
+
+  const layersNow = layerCount();
+  await key("p");
+  await click(600, 500);
+  await key("Escape");
+  check(layerCount() === layersNow && pressed("Select") === "true", "a one-point pen path leaves nothing behind");
+  await key("p");
+  await click(400, 100);
+  await click(500, 120);
+  await click(500, 120);
+  await doubleClick(500, 120);
+  check(layerCount() === layersNow + 1, "clicking the last point finishes an open path");
+  check(!status().includes("Drag points"), "without the double-click starting an edit");
+  await checkScreen("after editing points");
+
+  section("Files");
+  await press([...document.querySelectorAll("header button")].find((b) => b.textContent.includes("Export SVG")));
+  const svg = downloads.at(-1);
+  check(svg.filename === "graphicgene.svg" && svg.type === "image/svg+xml", "Export SVG downloads graphicgene.svg");
+  const parsed = new window.DOMParser().parseFromString(await svg.text(), "image/svg+xml");
+  check(!parsed.querySelector("parsererror"), "which is well-formed");
+  check(parsed.querySelectorAll("path").length === layerCount(), "with one <path> per layer");
+  check(parsed.documentElement.getAttribute("width") === "800", "and the artboard's size");
+
+  const project = await downloadProject();
+  check(
+    downloads.at(-1).filename === "graphicgene-project.json" && JSON.parse(project).version === 1,
+    "the project downloads as versioned JSON",
+  );
+
+  await wait(1000);
+  check(/Saved \d/.test(status()), `autosave reports in the status bar (${status()})`);
+  const savedLayers = layerCount();
+  await act(async () => root.unmount());
+  root = await mount(App, () => status().includes("Restored"));
+  place();
+  check(layerCount() === savedLayers, `reopening restores the autosave (${layerCount()} of ${savedLayers})`);
+  check(status().includes("Restored your last session"), "and says so");
+  await checkScreen("after a reload");
+
+  const input = document.querySelector('input[type="file"]');
+  const open = async (file) => {
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    await act(async () => input.dispatchEvent(new window.Event("change", { bubbles: true })));
+    await wait(50);
+  };
+  const small = JSON.parse(project);
+  small.document.artboard = { width: 320, height: 200 };
+  await open(new File([JSON.stringify(small)], "small.json", { type: "application/json" }));
+  check(status().includes("Opened small.json"), "opening a file loads it");
+  check(canvas().width === 320 && canvas().height === 200, "the canvas takes the file's artboard size");
+  place();
+  await checkScreen("after opening a smaller artboard");
+
+  await open(new File(["{ not json"], "broken.json"));
+  check(!!document.querySelector('[role="alert"]'), "a broken file shows an error");
+  check(canvas().width === 320, "and leaves the document alone");
+  await press(document.querySelector('[role="alert"] button'));
+  check(!document.querySelector('[role="alert"]'), "the error can be dismissed");
+  await act(async () => root.unmount());
+} finally {
+  await server.close();
+}
+
+console.log(failures ? `\n${failures} check(s) failed` : "\nui: ok");
+process.exit(failures ? 1 : 0);

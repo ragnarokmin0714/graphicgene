@@ -46,8 +46,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:wasm
-      # No browser engine in CI, so this is what stands in for the app working.
+      # No browser engine in CI, so these stand in for the app working: the
+      # wasm boundary end to end, then the React app driven in jsdom.
       - run: pnpm --filter @graphicgene/web smoke
+      - run: pnpm --filter @graphicgene/web ui
       - name: Build web app
         # GitHub Pages serves from /<repo>/, so the base path must match.
         run: pnpm --filter @graphicgene/web build
