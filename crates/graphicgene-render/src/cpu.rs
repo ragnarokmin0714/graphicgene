@@ -137,9 +137,8 @@ impl Renderer for CpuRenderer {
         let fill = background.premultiply().to_color_u8();
         let fill = [fill.red(), fill.green(), fill.blue(), fill.alpha()];
         for y in rows.clone() {
-            for pixel in self.scratch[y * stride + x0..y * stride + x1].chunks_exact_mut(4) {
-                pixel.copy_from_slice(&fill);
-            }
+            let (pixels, _) = self.scratch[y * stride + x0..y * stride + x1].as_chunks_mut::<4>();
+            pixels.fill(fill);
         }
         {
             let mut canvas = PixmapMut::from_bytes(&mut self.scratch[..len], width, height)
