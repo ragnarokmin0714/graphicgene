@@ -3,7 +3,7 @@
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::{Command, Journal};
 use graphicgene_core::doc::Document;
-use graphicgene_core::geom::{Affine, BezPath, Rect, Shape};
+use graphicgene_core::geom::{Affine, BezPath, Rect, Shape, Size};
 use graphicgene_core::node::{BlendMode, Node, NodeId, NodeKind, Stroke};
 use graphicgene_core::svg::to_svg;
 
@@ -27,8 +27,8 @@ fn square() -> BezPath {
 }
 
 #[test]
-fn an_empty_document_is_an_empty_svg_of_the_given_size() {
-    let svg = to_svg(&Document::new(), 800.0, 600.0).unwrap();
+fn an_empty_document_is_an_empty_svg_the_size_of_its_artboard() {
+    let svg = to_svg(&Document::with_artboard(Size::new(800.0, 600.0))).unwrap();
     assert_eq!(
         svg,
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"800\" height=\"600\" viewBox=\"0 0 800 600\">\n</svg>\n"
@@ -55,7 +55,7 @@ fn fills_are_srgb_hex_in_paint_order() {
         Node::vector("Above", square(), Some(blue)),
     );
 
-    let svg = to_svg(&doc, 100.0, 100.0).unwrap();
+    let svg = to_svg(&doc).unwrap();
     let below = svg.find(r#"data-name="Below""#).unwrap();
     let above = svg.find(r#"data-name="Above""#).unwrap();
     assert!(
@@ -81,7 +81,7 @@ fn transforms_opacity_and_blend_are_attributes_not_baked_geometry() {
     node.common.blend_mode = BlendMode::Multiply;
     insert(&mut doc, &mut journal, root, node);
 
-    let svg = to_svg(&doc, 100.0, 100.0).unwrap();
+    let svg = to_svg(&doc).unwrap();
     assert!(
         svg.contains(r#"transform="matrix(2 0 0 2 20 30)""#),
         "{svg}"
@@ -110,7 +110,7 @@ fn groups_nest_hidden_nodes_are_omitted_and_strokes_are_written() {
     hidden.common.visible = false;
     insert(&mut doc, &mut journal, group, hidden);
 
-    let svg = to_svg(&doc, 100.0, 100.0).unwrap();
+    let svg = to_svg(&doc).unwrap();
     assert!(
         svg.contains("<g data-name=\"Group\">\n    <path data-name=\"Line\""),
         "{svg}"
@@ -134,7 +134,7 @@ fn names_are_escaped() {
         root,
         Node::vector(name, square(), None),
     );
-    let svg = to_svg(&doc, 10.0, 10.0).unwrap();
+    let svg = to_svg(&doc).unwrap();
     assert!(
         svg.contains(r#"data-name="&lt;a &amp; &quot;b&quot;&gt;""#),
         "{svg}"

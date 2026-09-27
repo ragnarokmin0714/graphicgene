@@ -12,7 +12,7 @@
 
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::Command;
-use graphicgene_core::geom::{Affine, BezPath, Ellipse, Point, Rect, Shape, Vec2};
+use graphicgene_core::geom::{Affine, BezPath, Ellipse, Point, Rect, Shape, Size, Vec2};
 use graphicgene_core::gesture::{Modifiers, ShapeKind, TransformKind};
 use graphicgene_core::node::{Node, NodeId, Stroke};
 use graphicgene_core::path_edit::PressOutcome;
@@ -37,19 +37,28 @@ pub struct Editor {
 
 #[wasm_bindgen]
 impl Editor {
+    /// A new document with a `width` × `height` artboard. A document loaded
+    /// later brings its own size.
     #[wasm_bindgen(constructor)]
     pub fn new(width: u32, height: u32) -> Result<Editor, JsError> {
+        let session = Session::with_artboard(Size::new(width.into(), height.into()));
         Ok(Editor {
-            session: Session::new(),
+            pixmap: pixmap_for(&session)?,
+            session,
             renderer: CpuRenderer::new(),
-            pixmap: pixmap(width, height)?,
             scene: RenderScene::default(),
         })
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), JsError> {
-        self.pixmap = pixmap(width, height)?;
-        Ok(())
+    /// The artboard's width in pixels: the size the canvas must be.
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> u32 {
+        self.pixmap.width()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> u32 {
+        self.pixmap.height()
     }
 
     // ---- Document and history ------------------------------------------------
@@ -131,15 +140,22 @@ impl Editor {
         self.session.save().map_err(to_js)
     }
 
+    /// Replace the document. Its artboard may be a different size, so read
+    /// `width` and `height` again afterwards.
     #[wasm_bindgen(js_name = loadJson)]
     pub fn load_json(&mut self, text: &str) -> Result<(), JsError> {
-        self.session.load(text).map_err(to_js)
+        self.session.load(text).map_err(to_js)?;
+        let pixmap = pixmap_for(&self.session)?;
+        if (pixmap.width(), pixmap.height()) != (self.pixmap.width(), self.pixmap.height()) {
+            self.pixmap = pixmap;
+        }
+        Ok(())
     }
 
-    /// The artwork as SVG, `width` × `height` in size.
+    /// The artwork as SVG, the size of the artboard.
     #[wasm_bindgen(js_name = exportSvg)]
-    pub fn export_svg(&self, width: f64, height: f64) -> Result<String, JsError> {
-        self.session.export_svg(width, height).map_err(to_js)
+    pub fn export_svg(&self) -> Result<String, JsError> {
+        self.session.export_svg().map_err(to_js)
     }
 
     // ---- Pixels ------------------------------------------------------------------
@@ -524,8 +540,11 @@ fn mode_name(mode: Mode) -> &'static str {
     }
 }
 
-fn pixmap(width: u32, height: u32) -> Result<Pixmap, JsError> {
-    Pixmap::new(width, height).ok_or_else(|| JsError::new("invalid canvas size"))
+/// A pixmap covering the artboard at one pixel per document unit.
+fn pixmap_for(session: &Session) -> Result<Pixmap, JsError> {
+    let size = session.document().artboard();
+    Pixmap::new(size.width.ceil() as u32, size.height.ceil() as u32)
+        .ok_or_else(|| JsError::new("invalid artboard size"))
 }
 
 fn colour(srgb: &[u8]) -> Result<LinearRgba, JsError> {

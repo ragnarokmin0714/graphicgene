@@ -24,8 +24,8 @@ export function useEditor(width: number, height: number) {
     return () => {
       cancelled = true;
     };
-    // Size changes go through resize(), not a fresh editor — a new editor
-    // would discard the document.
+    // Created once: the size only seeds a new document. After that the
+    // artboard belongs to the document, and a fresh editor would discard it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -13,8 +13,11 @@ import { readProject, writeProject } from "@/storage";
 import { type Tool, ToolDock } from "@/ToolDock";
 import { useEditor } from "@/useEditor";
 
-const WIDTH = 800;
-const HEIGHT = 600;
+/**
+ * The artboard for a brand-new document. After that the size belongs to the
+ * document — a loaded file brings its own — so it is read back from the core.
+ */
+const NEW_ARTBOARD = { width: 800, height: 600 };
 const PROJECT_FILE = "graphicgene-project.json";
 const SVG_FILE = "graphicgene.svg";
 /** Quiet time after the last edit before autosaving, in ms. */
@@ -66,7 +69,10 @@ function hintFor(tool: Tool, mode: EditorMode | null): string | null {
  * next visit, and moves project and SVG files in and out of the browser.
  */
 export function App() {
-  const { editor, revision, error, clearError, run, ready } = useEditor(WIDTH, HEIGHT);
+  const { editor, revision, error, clearError, run, ready } = useEditor(
+    NEW_ARTBOARD.width,
+    NEW_ARTBOARD.height,
+  );
   const [tool, setTool] = useState<Tool>("select");
   const [notice, setNotice] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -79,6 +85,8 @@ export function App() {
   const lastSaved = useRef<string | null>(null);
 
   const core = editor.current;
+  const width = core?.width ?? NEW_ARTBOARD.width;
+  const height = core?.height ?? NEW_ARTBOARD.height;
   const layerCount = core ? core.layers().length : 0;
   const selectionCount = core?.selectionCount ?? 0;
   const mode = core?.mode ?? null;
@@ -162,7 +170,7 @@ export function App() {
     run((editor) => download(PROJECT_FILE, editor.toJson(), "application/json"));
 
   const exportSvg = () =>
-    run((editor) => download(SVG_FILE, editor.exportSvg(WIDTH, HEIGHT), "image/svg+xml"));
+    run((editor) => download(SVG_FILE, editor.exportSvg(), "image/svg+xml"));
 
   /** Switching tools finishes a pen path or path edit in progress. */
   const changeTool = (next: Tool) => {
@@ -266,8 +274,8 @@ export function App() {
               editor={editor}
               revision={revision}
               run={run}
-              width={WIDTH}
-              height={HEIGHT}
+              width={width}
+              height={height}
               tool={tool}
               nextFill={nextFill}
               onShapeDrawn={() => setTool("select")}
@@ -289,8 +297,8 @@ export function App() {
         </main>
 
         <StatusBar
-          width={WIDTH}
-          height={HEIGHT}
+          width={width}
+          height={height}
           layerCount={layerCount}
           selectionCount={selectionCount}
           hint={hintFor(tool, mode)}

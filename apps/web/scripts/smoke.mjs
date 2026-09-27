@@ -153,10 +153,18 @@ assert.equal(JSON.parse(pen.overlay()).mode, null);
 
 // Export and save: SVG text for the artwork, and a project file without the
 // detached nodes that undo keeps alive.
-const svg = pen.exportSvg(W, H);
+const svg = pen.exportSvg();
 assert.match(svg, /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg" width="64" height="64"/);
 assert.match(svg, /<path data-name="Path" d="M10,10 L50,10 L50,50 Z" fill="none" stroke="#ff0000" stroke-width="2"\/>/);
 assert.equal(pen.busy(), false);
+
+// The artboard belongs to the document: a loaded file brings its size along.
+const wide = new Editor(120, 40);
+wide.addRect(0, 0, 10, 10, RED);
+const resized = new Editor(W, H);
+resized.loadJson(wide.toJson());
+assert.deepEqual([resized.width, resized.height], [120, 40], "loading adopts the file's artboard");
+assert.equal(resized.render().length, 120 * 40 * 4, "and renders at that size");
 const bloated = new Editor(W, H);
 for (let i = 0; i < 5; i++) {
   bloated.addRect(0, 0, 10, 10, RED);

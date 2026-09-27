@@ -6,8 +6,9 @@
 //! The tree maps one to one — groups become `<g>`, vector nodes `<path>` —
 //! and each node's transform, opacity and blend mode are written as its own
 //! attributes rather than baked into coordinates, so the file stays editable
-//! in other tools. Hidden nodes are left out. There is no background: the
-//! artboard's white is the editor's backdrop, not part of the artwork.
+//! in other tools. Hidden nodes are left out. The file is the size of the
+//! document's artboard. There is no background: the artboard's white is the
+//! editor's backdrop, not part of the artwork.
 
 use std::fmt::Write;
 
@@ -17,12 +18,10 @@ use crate::error::Result;
 use crate::geom::Affine;
 use crate::node::{BlendMode, NodeId, NodeKind};
 
-/// The document as an SVG file, `width` × `height` document units in size.
-///
-/// The document has no artboard of its own yet, so the size comes from the
-/// caller.
-pub fn to_svg(doc: &Document, width: f64, height: f64) -> Result<String> {
-    let (w, h) = (number(width), number(height));
+/// The document as an SVG file the size of its artboard.
+pub fn to_svg(doc: &Document) -> Result<String> {
+    let artboard = doc.artboard();
+    let (w, h) = (number(artboard.width), number(artboard.height));
     let mut out = String::new();
     // Writing to a String cannot fail; the results below are ignored for that reason.
     let _ = writeln!(

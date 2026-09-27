@@ -21,7 +21,7 @@ use crate::color::LinearRgba;
 use crate::command::{Command, Journal};
 use crate::doc::{Changes, Document};
 use crate::error::Result;
-use crate::geom::{Affine, BezPath, Point, Rect, Vec2};
+use crate::geom::{Affine, BezPath, Point, Rect, Size, Vec2};
 use crate::gesture::{self, Frame, Gesture, Modifiers, ShapeKind, TransformKind};
 use crate::hit;
 use crate::layout;
@@ -135,8 +135,17 @@ pub struct Session {
 }
 
 impl Session {
+    /// A session on a new document with the default artboard.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A session on a new document with an artboard of the given size.
+    pub fn with_artboard(artboard: Size) -> Self {
+        Self {
+            document: Document::with_artboard(artboard),
+            ..Self::default()
+        }
     }
 
     pub fn document(&self) -> &Document {
@@ -237,9 +246,9 @@ impl Session {
         Ok(())
     }
 
-    /// The artwork as SVG, `width` × `height` in size.
-    pub fn export_svg(&self, width: f64, height: f64) -> Result<String> {
-        crate::svg::to_svg(&self.document, width, height)
+    /// The artwork as SVG, the size of the artboard.
+    pub fn export_svg(&self) -> Result<String> {
+        crate::svg::to_svg(&self.document)
     }
 
     /// Run the layout pass and hand over what changed since the last call:

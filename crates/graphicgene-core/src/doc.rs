@@ -15,13 +15,20 @@ use serde::{Deserialize, Serialize};
 use slotmap::SlotMap;
 
 use crate::error::{CoreError, Result};
-use crate::geom::{Affine, BezPath, Bounds, empty_bounds, union};
+use crate::geom::{Affine, BezPath, Bounds, Size, empty_bounds, union};
 use crate::node::{Node, NodeId, NodeKind};
+
+/// The artboard every v0.1 document was drawn on, and the size of a new one.
+pub const DEFAULT_ARTBOARD: Size = Size::new(800.0, 600.0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     nodes: SlotMap<NodeId, Node>,
     root: NodeId,
+    /// The page the artwork is laid out on, from (0, 0), in document units.
+    /// Files from before it was recorded were all drawn on the default.
+    #[serde(default = "default_artboard")]
+    artboard: Size,
     /// Not saved: a document fresh from a file has changed "everything".
     #[serde(skip, default = "Changes::everything")]
     changes: Changes,
@@ -69,9 +76,22 @@ impl Document {
         Self {
             nodes,
             root,
+            artboard: DEFAULT_ARTBOARD,
             changes: Changes::everything(),
             structure_version: 0,
         }
+    }
+
+    /// A new, empty document on an artboard of the given size.
+    pub fn with_artboard(artboard: Size) -> Self {
+        Self {
+            artboard,
+            ..Self::new()
+        }
+    }
+
+    pub fn artboard(&self) -> Size {
+        self.artboard
     }
 
     pub fn root(&self) -> NodeId {
@@ -279,4 +299,8 @@ impl Document {
         let reachable: std::collections::HashSet<NodeId> = self.walk().into_iter().collect();
         self.nodes.retain(|id, _| reachable.contains(&id));
     }
+}
+
+fn default_artboard() -> Size {
+    DEFAULT_ARTBOARD
 }

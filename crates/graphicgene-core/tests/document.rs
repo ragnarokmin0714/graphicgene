@@ -194,3 +194,23 @@ fn geometry_survives_save_and_load_bit_for_bit() {
         assert_eq!(a.to_bits(), b.to_bits(), "{a} != {b}");
     }
 }
+
+#[test]
+fn the_artboard_is_saved_and_older_files_get_the_default() {
+    use graphicgene_core::doc::DEFAULT_ARTBOARD;
+    use graphicgene_core::geom::Size;
+
+    let doc = Document::with_artboard(Size::new(1920.0, 1080.0));
+    let text = Project::new(doc).to_json().unwrap();
+    let back = Project::from_json(&text).unwrap().document;
+    assert_eq!(back.artboard(), Size::new(1920.0, 1080.0));
+
+    // A v0.1 file, written before the artboard was recorded.
+    let mut value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    value["document"]
+        .as_object_mut()
+        .unwrap()
+        .remove("artboard");
+    let old = Project::from_json(&value.to_string()).unwrap().document;
+    assert_eq!(old.artboard(), DEFAULT_ARTBOARD);
+}

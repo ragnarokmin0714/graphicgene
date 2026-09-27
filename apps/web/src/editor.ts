@@ -99,10 +99,6 @@ export class EditorHandle {
     return new EditorHandle(new Editor(width, height));
   }
 
-  resize(width: number, height: number): void {
-    this.inner.resize(width, height);
-  }
-
   addRect(x: number, y: number, w: number, h: number, color: Rgba): string {
     return this.inner.addRect(x, y, w, h, new Uint8Array(color));
   }
@@ -300,9 +296,21 @@ export class EditorHandle {
     this.inner.loadJson(text);
   }
 
-  /** The artwork as SVG text; the caller decides where it goes. */
-  exportSvg(width: number, height: number): string {
-    return this.inner.exportSvg(width, height);
+  /** The artwork as SVG text, the size of the artboard; the caller decides where it goes. */
+  exportSvg(): string {
+    return this.inner.exportSvg();
+  }
+
+  /**
+   * The artboard's size in pixels, which the canvas must match. It belongs to
+   * the document, so it can change when a different one is loaded.
+   */
+  get width(): number {
+    return this.inner.width;
+  }
+
+  get height(): number {
+    return this.inner.height;
   }
 
   /** A press is in progress and the document holds a preview: do not save now. */
