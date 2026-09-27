@@ -22,23 +22,28 @@ const W = 64;
 const H = 64;
 const RED = new Uint8Array([255, 0, 0, 255]);
 const pixel = (data, x, y) => Array.from(data.slice((y * W + x) * 4, (y * W + x) * 4 + 4));
+/** Bring the pixels up to date and copy them out, for asserting on. */
+const draw = (editor) => {
+  editor.render();
+  return editor.pixelBytes();
+};
 
 const editor = new Editor(W, H);
 const id = editor.addRect(0, 0, 20, 20, RED);
 
-assert.deepEqual(pixel(editor.render(), 5, 5), [255, 0, 0, 255], "fill should be drawn");
-assert.deepEqual(pixel(editor.render(), 40, 40), [255, 255, 255, 255], "outside stays clear");
+assert.deepEqual(pixel(draw(editor), 5, 5), [255, 0, 0, 255], "fill should be drawn");
+assert.deepEqual(pixel(draw(editor), 40, 40), [255, 255, 255, 255], "outside stays clear");
 
 editor.setTransform(id, new Float64Array([1, 0, 0, 1, 30, 30]));
-let data = editor.render();
+let data = draw(editor);
 assert.deepEqual(pixel(data, 5, 5), [255, 255, 255, 255], "old position should be vacated");
 assert.deepEqual(pixel(data, 35, 35), [255, 0, 0, 255], "new position should be filled");
 
 assert.equal(editor.canUndo(), true);
 editor.undo();
-assert.deepEqual(pixel(editor.render(), 35, 35), [255, 255, 255, 255], "undo should revert");
+assert.deepEqual(pixel(draw(editor), 35, 35), [255, 255, 255, 255], "undo should revert");
 editor.redo();
-assert.deepEqual(pixel(editor.render(), 35, 35), [255, 0, 0, 255], "redo should reapply");
+assert.deepEqual(pixel(draw(editor), 35, 35), [255, 0, 0, 255], "redo should reapply");
 
 // The invariant the whole architecture rests on: a node's id survives a
 // save/load round trip. Components and any future collaboration depend on it.
@@ -49,7 +54,7 @@ assert.ok(
   layers.some((layer) => layer.id === id),
   `NodeId ${id} must survive save/load, got ${JSON.stringify(layers.map((l) => l.id))}`,
 );
-assert.deepEqual(pixel(reloaded.render(), 35, 35), [255, 0, 0, 255], "reload should redraw");
+assert.deepEqual(pixel(draw(reloaded), 35, 35), [255, 0, 0, 255], "reload should redraw");
 
 // The layer panel reads rows in display order: no root row, topmost first.
 const top = reloaded.addEllipse(50, 50, 4, 4, RED);
@@ -70,7 +75,7 @@ canvas.updateGesture(20, 20, false, false);
 canvas.updateGesture(30, 30, false, false);
 const drawn = canvas.endGesture();
 assert.ok(drawn, "drawing a shape should return its id");
-assert.deepEqual(pixel(canvas.render(), 20, 20), [255, 0, 0, 255], "drawn rect should render");
+assert.deepEqual(pixel(draw(canvas), 20, 20), [255, 0, 0, 255], "drawn rect should render");
 assert.equal(canvas.selectionCount(), 1, "a drawn shape becomes the selection");
 assert.equal(JSON.parse(canvas.layerTree())[0].selected, true, "layer rows report selection");
 
@@ -83,14 +88,14 @@ assert.equal(canvas.beginMove(20, 20), true);
 for (let step = 1; step <= 20; step++) canvas.updateGesture(20 + step, 20 + step, false, false);
 assert.equal(JSON.parse(canvas.overlay()).gesture, "move");
 canvas.endGesture();
-data = canvas.render();
+data = draw(canvas);
 assert.deepEqual(pixel(data, 15, 15), WHITE, "drag should vacate the old spot");
 assert.deepEqual(pixel(data, 45, 45), [255, 0, 0, 255], "drag should fill the new spot");
 const corners = JSON.parse(canvas.overlay()).frame.corners;
 assert.deepEqual(corners[0], [30, 30], "overlay frame should follow the drag");
 
 canvas.undo();
-assert.deepEqual(pixel(canvas.render(), 15, 15), [255, 0, 0, 255], "one undo reverts the whole drag");
+assert.deepEqual(pixel(draw(canvas), 15, 15), [255, 0, 0, 255], "one undo reverts the whole drag");
 canvas.redo();
 
 assert.equal(canvas.selectAt(45, 45, true, 4), "hit", "shift-click on a selected node deselects it");
@@ -98,9 +103,9 @@ assert.equal(canvas.selectionCount(), 0);
 
 canvas.selectAll();
 assert.equal(canvas.deleteSelection(), true);
-assert.deepEqual(pixel(canvas.render(), 45, 45), WHITE, "delete removes the shape");
+assert.deepEqual(pixel(draw(canvas), 45, 45), WHITE, "delete removes the shape");
 canvas.undo();
-assert.deepEqual(pixel(canvas.render(), 45, 45), [255, 0, 0, 255], "undo restores it");
+assert.deepEqual(pixel(draw(canvas), 45, 45), [255, 0, 0, 255], "undo restores it");
 
 // Pen: three clicks, then a click on the first anchor closes the path.
 const TOL = 3;
@@ -121,11 +126,11 @@ const penPath = pen.penRelease();
 assert.ok(penPath, "closing finishes the path");
 assert.equal(JSON.parse(pen.overlay()).mode, null, "the pen hands back to normal mode");
 assert.equal(pen.selectionCount(), 1, "the finished path is selected");
-data = pen.render();
+data = draw(pen);
 assert.notDeepEqual(pixel(data, 30, 10), WHITE, "pen paths are stroked");
 assert.deepEqual(pixel(data, 40, 20), WHITE, "and not filled");
 pen.undo();
-assert.deepEqual(pixel(pen.render(), 30, 10), WHITE, "the whole pen path is one undo step");
+assert.deepEqual(pixel(draw(pen), 30, 10), WHITE, "the whole pen path is one undo step");
 pen.redo();
 
 // Path editing: drag an anchor, insert one on a segment, delete it.
@@ -164,7 +169,23 @@ wide.addRect(0, 0, 10, 10, RED);
 const resized = new Editor(W, H);
 resized.loadJson(wide.toJson());
 assert.deepEqual([resized.width, resized.height], [120, 40], "loading adopts the file's artboard");
-assert.equal(resized.render().length, 120 * 40 * 4, "and renders at that size");
+assert.equal(draw(resized).length, 120 * 40 * 4, "and renders at that size");
+
+// Only what changed is redrawn, and the result matches a full redraw.
+const partial = new Editor(200, 200);
+const moving = partial.addRect(10, 10, 10, 10, RED);
+partial.addRect(100, 100, 30, 30, RED);
+assert.deepEqual(Array.from(partial.render()), [0, 0, 200, 200], "the first frame is everything");
+assert.deepEqual(Array.from(partial.render()), [0, 0, 0, 0], "an unchanged frame redraws nothing");
+partial.selectLayer(moving, false);
+assert.deepEqual(Array.from(partial.render()), [0, 0, 0, 0], "selection is not pixels");
+partial.setTransform(moving, new Float64Array([1, 0, 0, 1, 6, 0]));
+const [, , dw, dh] = partial.render();
+assert.ok(dw > 0 && dw < 30 && dh > 0 && dh < 20, `a small move redraws a small area, got ${dw}x${dh}`);
+const fresh = new Editor(200, 200);
+fresh.loadJson(partial.toJson());
+fresh.render();
+assert.deepEqual(partial.pixelBytes(), fresh.pixelBytes(), "partial redraws equal a full one");
 const bloated = new Editor(W, H);
 for (let i = 0; i < 5; i++) {
   bloated.addRect(0, 0, 10, 10, RED);

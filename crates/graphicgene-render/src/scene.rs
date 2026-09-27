@@ -1,42 +1,102 @@
-//! The render scene: a flat, immutable snapshot of what to draw.
+//! The render scene: a flat snapshot of what to draw.
 //!
 //! The renderer never walks the live document. Editing and drawing are
 //! separate stages so that the document can be mutated freely without the
 //! renderer being exposed to partially-applied state, and so the snapshot can
 //! later be handed to another thread or a GPU backend unchanged.
 //!
-//! The scene is rebuilt per edit, not per frame.
+//! The scene is kept up to date from the document's change log rather than
+//! rebuilt: `update` refreshes only the items of nodes that changed, and
+//! reports the area that needs redrawing — where those items were, and where
+//! they are now. Only a change to the tree's shape rebuilds it.
+
+use std::collections::HashMap;
 
 use graphicgene_core::color::LinearRgba;
-use graphicgene_core::doc::Document;
+use graphicgene_core::doc::{Changes, Document};
 use graphicgene_core::error::Result;
-use graphicgene_core::geom::{Affine, BezPath, Bounds, Shape};
-use graphicgene_core::node::{BlendMode, NodeKind, Stroke};
+use graphicgene_core::geom::{
+    Affine, BezPath, Bounds, Shape, empty_bounds, is_empty_bounds, union,
+};
+use graphicgene_core::node::{BlendMode, NodeId, NodeKind, Stroke, VectorNode};
+
+/// Antialiasing touches up to a pixel beyond a shape's geometric edge.
+const AA_MARGIN: f64 = 1.0;
+/// How far a stroke can reach past its path, in stroke widths: half the
+/// width, times the renderer's miter limit of 4 for sharp corners.
+const STROKE_REACH: f64 = 2.0;
 
 /// One drawable, with its world transform and accumulated opacity baked in.
 #[derive(Debug, Clone)]
 pub struct RenderItem {
+    pub node: NodeId,
     pub transform: Affine,
     pub path: BezPath,
     pub fill: Option<LinearRgba>,
     pub stroke: Option<Stroke>,
     pub opacity: f32,
     pub blend_mode: BlendMode,
-    /// World-space bounds, used for dirty-rect culling and hit-testing.
+    /// World-space bounds of every pixel this item can touch — stroke and
+    /// antialiasing included — used for culling and for damage.
     pub bounds: Bounds,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct RenderScene {
+    /// Back to front.
     pub items: Vec<RenderItem>,
+    /// What the canvas is cleared to before drawing. `None` is transparent.
+    pub background: Option<LinearRgba>,
+    /// Where each vector node's item is in `items`.
+    index: HashMap<NodeId, usize>,
+}
+
+/// The part of the canvas an update invalidated.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Damage {
+    /// Nothing on screen changed.
+    None,
+    /// Only this world-space area needs redrawing.
+    Region(Bounds),
+    /// Redraw everything.
+    Everything,
 }
 
 impl RenderScene {
     /// Flatten a document into a draw list, back to front.
     pub fn build(doc: &Document) -> Result<Self> {
-        let mut items = Vec::new();
-        visit(doc, doc.root(), Affine::IDENTITY, 1.0, &mut items)?;
-        Ok(Self { items })
+        let mut scene = Self::default();
+        scene.rebuild(doc)?;
+        Ok(scene)
+    }
+
+    /// Bring the scene up to date with `changes` and report what to redraw.
+    ///
+    /// Items are refreshed in place for each changed node and its subtree.
+    /// A change to the tree's shape — or a node appearing or disappearing —
+    /// changes the item list itself, so the scene is rebuilt and everything
+    /// redrawn; those are single events, never the per-frame path.
+    pub fn update(&mut self, doc: &Document, changes: &Changes) -> Result<Damage> {
+        if changes.everything || changes.structure {
+            self.rebuild(doc)?;
+            return Ok(Damage::Everything);
+        }
+        let mut region = empty_bounds();
+        for &id in &changes.nodes {
+            if !doc.contains(id) || !doc.is_attached(id) {
+                continue;
+            }
+            let (transform, opacity, visible) = ancestry(doc, id)?;
+            if !self.refresh(doc, id, transform, opacity, visible, &mut region)? {
+                self.rebuild(doc)?;
+                return Ok(Damage::Everything);
+            }
+        }
+        Ok(if is_empty_bounds(region) {
+            Damage::None
+        } else {
+            Damage::Region(region)
+        })
     }
 
     pub fn bounds(&self) -> Option<Bounds> {
@@ -45,38 +105,115 @@ impl RenderScene {
             .map(|i| i.bounds)
             .reduce(|a, b| a.union(b))
     }
+
+    fn rebuild(&mut self, doc: &Document) -> Result<()> {
+        self.items.clear();
+        self.index.clear();
+        self.visit(doc, doc.root(), Affine::IDENTITY, 1.0)
+    }
+
+    fn visit(
+        &mut self,
+        doc: &Document,
+        id: NodeId,
+        parent_transform: Affine,
+        parent_opacity: f32,
+    ) -> Result<()> {
+        let node = doc.get(id)?;
+        if !node.common.visible || node.common.opacity <= 0.0 {
+            return Ok(());
+        }
+        let transform = parent_transform * node.common.transform;
+        let opacity = parent_opacity * node.common.opacity;
+
+        if let NodeKind::Vector(vector) = &node.kind {
+            self.index.insert(id, self.items.len());
+            self.items
+                .push(item(id, vector, transform, opacity, node.common.blend_mode));
+        }
+        for &child in doc.children_of(id)? {
+            self.visit(doc, child, transform, opacity)?;
+        }
+        Ok(())
+    }
+
+    /// Recompute the items of `id`'s subtree, growing `region` by where each
+    /// one was and now is. Returns false if an item would have to appear or
+    /// disappear, which only a rebuild can do.
+    fn refresh(
+        &mut self,
+        doc: &Document,
+        id: NodeId,
+        parent_transform: Affine,
+        parent_opacity: f32,
+        parent_visible: bool,
+        region: &mut Bounds,
+    ) -> Result<bool> {
+        let node = doc.get(id)?;
+        // The same test `visit` applies, carried down the subtree.
+        let visible = parent_visible && node.common.visible && node.common.opacity > 0.0;
+        let transform = parent_transform * node.common.transform;
+        let opacity = parent_opacity * node.common.opacity;
+
+        if let NodeKind::Vector(vector) = &node.kind {
+            match (visible, self.index.get(&id)) {
+                (true, Some(&i)) => {
+                    let fresh = item(id, vector, transform, opacity, node.common.blend_mode);
+                    *region = union(union(*region, self.items[i].bounds), fresh.bounds);
+                    self.items[i] = fresh;
+                }
+                (false, None) => {}
+                _ => return Ok(false),
+            }
+        }
+        for &child in doc.children_of(id)? {
+            if !self.refresh(doc, child, transform, opacity, visible, region)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
 }
 
-fn visit(
-    doc: &Document,
-    id: graphicgene_core::node::NodeId,
-    parent_transform: Affine,
-    parent_opacity: f32,
-    out: &mut Vec<RenderItem>,
-) -> Result<()> {
-    let node = doc.get(id)?;
-    if !node.common.visible || node.common.opacity <= 0.0 {
-        return Ok(());
+/// The accumulated transform and opacity above `id`, and whether every
+/// ancestor is drawn at all — the state `visit` would arrive at `id` with.
+fn ancestry(doc: &Document, id: NodeId) -> Result<(Affine, f32, bool)> {
+    let mut chain = Vec::new();
+    let mut cursor = doc.get(id)?.common.parent;
+    while let Some(ancestor) = cursor {
+        chain.push(ancestor);
+        cursor = doc.get(ancestor)?.common.parent;
     }
-
-    let transform = parent_transform * node.common.transform;
-    let opacity = parent_opacity * node.common.opacity;
-
-    if let NodeKind::Vector(v) = &node.kind {
-        let bounds = transform.transform_rect_bbox(v.path.bounding_box());
-        out.push(RenderItem {
-            transform,
-            path: v.path.clone(),
-            fill: v.fill,
-            stroke: v.stroke,
-            opacity,
-            blend_mode: node.common.blend_mode,
-            bounds,
-        });
+    let (mut transform, mut opacity, mut visible) = (Affine::IDENTITY, 1.0f32, true);
+    for &ancestor in chain.iter().rev() {
+        let common = &doc.get(ancestor)?.common;
+        transform *= common.transform;
+        opacity *= common.opacity;
+        visible &= common.visible && common.opacity > 0.0;
     }
+    Ok((transform, opacity, visible))
+}
 
-    for child in doc.children_of(id)? {
-        visit(doc, *child, transform, opacity, out)?;
+fn item(
+    node: NodeId,
+    vector: &VectorNode,
+    transform: Affine,
+    opacity: f32,
+    blend_mode: BlendMode,
+) -> RenderItem {
+    let reach = vector.stroke.map_or(0.0, |s| s.width * STROKE_REACH);
+    let local = vector.path.bounding_box().inflate(reach, reach);
+    let bounds = transform
+        .transform_rect_bbox(local)
+        .inflate(AA_MARGIN, AA_MARGIN);
+    RenderItem {
+        node,
+        transform,
+        path: vector.path.clone(),
+        fill: vector.fill,
+        stroke: vector.stroke,
+        opacity,
+        blend_mode,
+        bounds,
     }
-    Ok(())
 }

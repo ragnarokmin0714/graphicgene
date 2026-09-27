@@ -25,10 +25,10 @@ fn scene_bakes_world_transform_into_items() {
 
     let scene = RenderScene::build(&doc).unwrap();
     assert_eq!(scene.items.len(), 1);
-    assert_eq!(
-        (scene.items[0].bounds.x0, scene.items[0].bounds.y0),
-        (20.0, 30.0)
-    );
+    assert_eq!(scene.items[0].transform, Affine::translate((20.0, 30.0)));
+    // Bounds are in world space, with a pixel of antialiasing around them.
+    let b = scene.items[0].bounds;
+    assert_eq!((b.x0, b.y0, b.x1, b.y1), (19.0, 29.0, 31.0, 41.0));
 }
 
 #[test]

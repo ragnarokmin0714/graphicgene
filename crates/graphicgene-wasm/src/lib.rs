@@ -9,6 +9,10 @@
 //! a desktop shell gets the same rules for free. What lives here is only what
 //! is specific to JavaScript: node ids as strings, colours as sRGB bytes,
 //! results as JSON, and the pixel buffer the canvas is painted from.
+//!
+//! Pixels never cross the boundary by copy. `render` redraws only what
+//! changed and says where; the page reads that part in place from wasm
+//! memory through `pixelsPtr`.
 
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::Command;
@@ -17,7 +21,7 @@ use graphicgene_core::gesture::{Modifiers, ShapeKind, TransformKind};
 use graphicgene_core::node::{Node, NodeId, Stroke};
 use graphicgene_core::path_edit::PressOutcome;
 use graphicgene_core::session::{Mode, Overlay, SelectOutcome, Session};
-use graphicgene_render::{CpuRenderer, RenderScene, Renderer};
+use graphicgene_render::{CpuRenderer, Damage, PixelRect, RenderScene, Renderer};
 use serde_json::{Value, json};
 use slotmap::{Key, KeyData};
 use tiny_skia::Pixmap;
@@ -42,11 +46,13 @@ impl Editor {
     #[wasm_bindgen(constructor)]
     pub fn new(width: u32, height: u32) -> Result<Editor, JsError> {
         let session = Session::with_artboard(Size::new(width.into(), height.into()));
+        let mut scene = RenderScene::default();
+        scene.background = Some(LinearRgba::WHITE);
         Ok(Editor {
             pixmap: pixmap_for(&session)?,
             session,
             renderer: CpuRenderer::new(),
-            scene: RenderScene::default(),
+            scene,
         })
     }
 
@@ -160,26 +166,45 @@ impl Editor {
 
     // ---- Pixels ------------------------------------------------------------------
 
-    /// Render and return RGBA bytes for the whole canvas.
+    /// Bring the pixels up to date and return the area that changed, as
+    /// `[x, y, width, height]` in pixels — all zeros when nothing did, as
+    /// after a selection click or a hover.
     ///
-    /// One copy per frame across the boundary. When this becomes the
-    /// bottleneck the fix is a shared buffer, not a chattier API.
-    pub fn render(&mut self) -> Result<Vec<u8>, JsError> {
+    /// Only that area is redrawn. Read the pixels in place with `pixelsPtr`.
+    pub fn render(&mut self) -> Result<Vec<u32>, JsError> {
         let changes = self.session.prepare_render().map_err(to_js)?;
-        if !changes.is_empty() {
-            self.scene = RenderScene::build(self.session.document()).map_err(to_js)?;
-        }
-        self.pixmap.fill(tiny_skia::Color::WHITE);
-        let dirty = Rect::new(
-            0.0,
-            0.0,
-            self.pixmap.width() as f64,
-            self.pixmap.height() as f64,
-        );
+        let damage = self
+            .scene
+            .update(self.session.document(), &changes)
+            .map_err(to_js)?;
+        let (width, height) = (self.pixmap.width(), self.pixmap.height());
+        let dirty = match damage {
+            Damage::None => return Ok(vec![0; 4]),
+            Damage::Region(region) => region,
+            Damage::Everything => Rect::new(0.0, 0.0, width.into(), height.into()),
+        };
         self.renderer
             .render(&self.scene, dirty, &mut self.pixmap)
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(self.pixmap.data().to_vec())
+        Ok(match PixelRect::covering(dirty, width, height) {
+            Some(rect) => vec![rect.x, rect.y, rect.width, rect.height],
+            None => vec![0; 4],
+        })
+    }
+
+    /// Where the canvas pixels start in wasm memory: `width * height * 4`
+    /// bytes of RGBA, premultiplied. The same address until the artboard
+    /// changes size; the page must still rebuild its view whenever wasm
+    /// memory grows, which detaches the old buffer.
+    #[wasm_bindgen(js_name = pixelsPtr)]
+    pub fn pixels_ptr(&self) -> *const u8 {
+        self.pixmap.data().as_ptr()
+    }
+
+    /// A copy of the canvas pixels. For tests and exports, not for frames.
+    #[wasm_bindgen(js_name = pixelBytes)]
+    pub fn pixel_bytes(&self) -> Vec<u8> {
+        self.pixmap.data().to_vec()
     }
 
     // ---- Layer panel -------------------------------------------------------------

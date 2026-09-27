@@ -5,9 +5,9 @@ pub mod cpu;
 pub mod renderer;
 pub mod scene;
 
-pub use cpu::CpuRenderer;
+pub use cpu::{CpuRenderer, PixelRect};
 pub use renderer::Renderer;
-pub use scene::{RenderItem, RenderScene};
+pub use scene::{Damage, RenderItem, RenderScene};
 
 use thiserror::Error;
 

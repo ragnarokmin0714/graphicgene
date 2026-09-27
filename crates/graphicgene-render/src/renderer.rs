@@ -1,8 +1,8 @@
 //! The renderer interface.
 //!
-//! `render` takes a dirty rect. Redrawing everything is the v0.1
-//! *implementation*; it is deliberately not the v0.1 *interface*, so that
-//! incremental redraw can be added without every call site changing.
+//! `render` takes a dirty rect, and the scene's `update` reports one: only the
+//! area where something changed is redrawn. The interface had that shape from
+//! the start, so adding incremental redraw changed no call site.
 //!
 //! The GPU backend (`wgpu` / `vello`) will be the second implementation of this
 //! trait. An abstraction with one implementation is not an abstraction — the
@@ -18,6 +18,10 @@ pub trait Renderer {
     type Target;
     type Error;
 
+    /// Redraw the part of `target` that `dirty` covers, from scratch: clear
+    /// it to the scene's background and draw every item reaching into it.
+    /// The rest of `target` must be left untouched — that is what makes
+    /// redrawing only what changed correct.
     fn render(
         &mut self,
         scene: &RenderScene,

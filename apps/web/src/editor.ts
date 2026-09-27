@@ -83,11 +83,18 @@ export type PressOutcome = "drag" | "hit" | "miss";
 /** What a press while editing a path landed on. */
 export type PathPressOutcome = "handle" | "anchor" | "segment" | "miss";
 
+/** A changed area of the canvas: x, y, width, height, in pixels. */
+export type PixelRect = readonly [number, number, number, number];
+
 let ready: Promise<void> | null = null;
+/** The wasm module's memory, where the canvas pixels live. */
+let memory: WebAssembly.Memory | null = null;
 
 /** Load the wasm module once, however many components ask for it. */
 export function loadCore(): Promise<void> {
-  ready ??= init().then(() => undefined);
+  ready ??= init().then((exports) => {
+    memory = exports.memory;
+  });
   return ready;
 }
 
@@ -270,9 +277,44 @@ export class EditorHandle {
     return JSON.parse(this.inner.overlay()) as Overlay;
   }
 
-  /** RGBA bytes for the whole canvas. */
-  render(): Uint8Array {
-    return this.inner.render();
+  /**
+   * Bring the pixels up to date and return the area that changed; all zeros
+   * when nothing did (a selection click, a hover). Only that area was
+   * redrawn, so only that area needs putting on the canvas.
+   */
+  render(): PixelRect {
+    const [x, y, width, height] = this.inner.render();
+    return [x, y, width, height];
+  }
+
+  private view: Uint8ClampedArray<ArrayBuffer> | null = null;
+
+  /**
+   * The canvas pixels, read in place from wasm memory — nothing is copied.
+   * The view is rebuilt when wasm memory grows (which detaches the old
+   * buffer) or the artboard changes size.
+   *
+   * The bytes are premultiplied RGBA, and ImageData expects straight alpha.
+   * The two are identical while every pixel is opaque, which holds because
+   * the artboard is always painted white first. A transparent artboard would
+   * have to unpremultiply here.
+   */
+  pixels(): Uint8ClampedArray<ArrayBuffer> {
+    if (!memory) throw new Error("wasm core is not loaded");
+    const pointer = this.inner.pixelsPtr();
+    const length = this.width * this.height * 4;
+    const view = this.view;
+    if (
+      !view ||
+      view.buffer !== memory.buffer ||
+      view.byteOffset !== pointer ||
+      view.length !== length
+    ) {
+      // Never a SharedArrayBuffer: this build has no wasm threads (GitHub
+      // Pages cannot enable them), and ImageData would refuse one.
+      this.view = new Uint8ClampedArray(memory.buffer as ArrayBuffer, pointer, length);
+    }
+    return this.view!;
   }
 
   layers(): LayerRow[] {
