@@ -90,12 +90,20 @@ fn vector_hit(vector: &VectorNode, world: Affine, point: Point, tolerance: f64) 
         return false;
     }
     let local = world.inverse() * point;
-    if vector.fill.is_some() && vector.path.winding(local) != 0 {
-        return true;
-    }
     // Tolerance is given in document units; convert it into this node's local
     // units with the transform's average scale.
     let reach = tolerance / det.abs().sqrt() + vector.stroke.map_or(0.0, |s| s.width / 2.0);
+    // Broad phase. A bezier never leaves the hull of its control points, so
+    // a point outside the control box, grown by the reach, can neither be
+    // inside the fill nor within reach of the outline. This skips the root
+    // solving below for almost every node a hover passes over.
+    let near = vector.path.control_box().inflate(reach, reach);
+    if !(near.x0 <= local.x && local.x <= near.x1 && near.y0 <= local.y && local.y <= near.y1) {
+        return false;
+    }
+    if vector.fill.is_some() && vector.path.winding(local) != 0 {
+        return true;
+    }
     vector
         .path
         .segments()
