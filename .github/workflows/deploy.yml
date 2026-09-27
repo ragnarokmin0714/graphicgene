@@ -39,6 +39,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # v1: v0 caches hold a wasm-pack the old action copied into
+          # ~/.cargo/bin, which `cargo install` refuses to overwrite.
+          prefix-key: v1-rust
       # From crates.io rather than a third-party action (the one used before
       # stopped at Node 16). rust-cache keeps ~/.cargo/bin, so this compiles
       # once and is a no-op until a new wasm-pack is released.
