@@ -1,4 +1,5 @@
 import { EyeOff, Folder, Layers, Lock, Spline } from "lucide-react";
+import { memo } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -6,11 +7,11 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Kbd } from "@/components/ui/kbd";
-import type { EditorHandle, LayerRow } from "@/editor";
+import type { LayerRow } from "@/editor";
 
 type Props = {
-  editor: React.RefObject<EditorHandle | null>;
-  revision: number;
+  /** Read by the caller and cached on the core's `layersVersion`. */
+  layers: LayerRow[];
   /** A row was clicked; `additive` when Shift was held. */
   onSelect: (id: string, additive: boolean) => void;
 };
@@ -19,19 +20,17 @@ type Props = {
 const INDENT = 12;
 
 /**
- * Reads the layer tree from the core on every revision and keeps no copy.
- * The core already hands rows back in panel order (topmost first, no root),
- * and says which are selected — selection lives in the core too.
+ * The layer rows as the core reports them: already in panel order (topmost
+ * first, no root), with selection marked — selection lives in the core too.
+ *
+ * Memoised, and fed rows cached on `layersVersion`, which holds still for
+ * a whole drag: the panel is not rebuilt sixty times a second while the
+ * canvas moves.
  *
  * Rows are `h-row` (28px) — the density token, not an ad-hoc height — so that
  * every future list in the app lines up without anyone re-deciding.
  */
-export function LayerPanel({ editor, revision, onSelect }: Props) {
-  const core = editor.current;
-  // `revision` drives the re-read; referenced so the intent is visible.
-  void revision;
-  const layers: LayerRow[] = core ? core.layers() : [];
-
+export const LayerPanel = memo(function LayerPanel({ layers, onSelect }: Props) {
   return (
     <aside className="bg-card w-panel flex shrink-0 flex-col border-l">
       <div className="h-bar flex shrink-0 items-center gap-2 px-3">
@@ -87,7 +86,7 @@ export function LayerPanel({ editor, revision, onSelect }: Props) {
       )}
     </aside>
   );
-}
+});
 
 function EmptyState() {
   return (

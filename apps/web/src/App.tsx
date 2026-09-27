@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { EditorMode, Rgba } from "@/editor";
@@ -87,10 +87,22 @@ export function App() {
   const core = editor.current;
   const width = core?.width ?? NEW_ARTBOARD.width;
   const height = core?.height ?? NEW_ARTBOARD.height;
-  const layerCount = core ? core.layers().length : 0;
+  // Rows are re-read only when the core says they may have changed — never
+  // during a drag, which is when this component re-renders every frame.
+  const layersVersion = core?.layersVersion ?? null;
+  const layers = useMemo(
+    () => (core && layersVersion !== null ? core.layers() : []),
+    [core, layersVersion],
+  );
+  const layerCount = layers.length;
   const selectionCount = core?.selectionCount ?? 0;
   const mode = core?.mode ?? null;
   const nextFill = () => SWATCHES[layerCount % SWATCHES.length];
+
+  const selectLayer = useCallback(
+    (id: string, additive: boolean) => run((editor) => editor.selectLayer(id, additive)),
+    [run],
+  );
 
   const undo = () => run((editor) => editor.undo());
   const redo = () => run((editor) => editor.redo());
@@ -289,11 +301,7 @@ export function App() {
               canRedo={core?.canRedo ?? false}
             />
           </section>
-          <LayerPanel
-            editor={editor}
-            revision={revision}
-            onSelect={(id, additive) => run((editor) => editor.selectLayer(id, additive))}
-          />
+          <LayerPanel layers={layers} onSelect={selectLayer} />
         </main>
 
         <StatusBar
