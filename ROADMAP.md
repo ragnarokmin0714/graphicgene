@@ -4,16 +4,16 @@ Milestones are ordered by what unblocks what. Each item says what it needs
 and which existing decision it leans on — the point of the architecture is
 that most of these are additions, not rewrites.
 
-## v0.1 — the vector core · feature-complete
+## v0.1 — the vector core · done, `v0.1.0`
 
 Draw rectangles, ellipses and bezier paths; select, move, scale and rotate
 them; edit any path point by point; undo everything; autosave in the browser,
 download and reopen project files, export SVG.
 
-Left before it counts as done: a hands-on browser pass over everything, and
-the GitHub Pages deploy.
+Deployed to GitHub Pages. The hands-on browser pass over everything is
+scheduled after v0.4.
 
-## v0.2 — a real editing surface
+## v0.2 — a real editing surface · in progress
 
 The things anyone misses in their first five minutes.
 

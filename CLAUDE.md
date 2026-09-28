@@ -14,8 +14,10 @@ ellipses included) can be edited point by point. The project autosaves to
 IndexedDB and is restored on the next visit; project files can be downloaded
 and opened, and the artwork exports as SVG.
 
-Every v0.1 feature is in. What stands between that and "done" is Roger's
-browser pass over everything since 2026-09-25 (below) and the Pages deploy.
+v0.1 is done and tagged `v0.1.0`; Pages deploys from `main`. Roger's
+browser pass over everything since 2026-09-25 (below) is scheduled after
+v0.4, by his choice on 2026-09-28 — until then, work is verified headlessly
+and each milestone is tagged when its roadmap items are in.
 
 An architecture pass followed on 2026-09-27: the editing session moved from
 the wasm crate into core, rendering became incremental with zero-copy pixels,
@@ -463,6 +465,14 @@ it ships. Revisit if a lighter DOM ever covers what `ui.mjs` needs.
 - Core crates must not reference browser or OS APIs. Platform differences go
   behind traits implemented at the app layer.
 - `.ai` format is permanently out of scope.
+
+## Releases
+
+Each milestone is an annotated tag, `vX.Y.0`, on the commit that completes
+it, and the workspace `version` in `Cargo.toml` moves to match in that
+commit. A fix after a tag is a patch tag (`vX.Y.1`). Tags do not deploy —
+Pages deploys from `main` — so pushing an old tag is safe. `v0.1.0` is
+`6a4f6e5`, the last commit before v0.2 work began.
 
 ## Deployment
 
