@@ -21,18 +21,17 @@ and each milestone is tagged when its roadmap items are in.
 
 An architecture pass followed on 2026-09-27: the editing session moved from
 the wasm crate into core, rendering became incremental with zero-copy pixels,
-and the artboard size became document state. v0.2 work started on 2026-09-28
-with zoom and pan: the canvas now covers the whole stage in device pixels, so
-it is sharp on HiDPI screens. The properties panel followed the same day:
-position, size, rotation, opacity, fill and stroke, typed, stepped or
-scrubbed, each change one undo step. Then the layer panel's operations:
-rename, hide, lock, drag to reorder, group and ungroup; copy, cut, paste
-and duplicate; and PNG export. What is next, and the known architectural
-debt, is in `ROADMAP.md`.
+and the artboard size became document state. v0.2 was built on 2026-09-28
+and tagged `v0.2.0`: zoom and pan, with the canvas covering the stage in
+device pixels so it is sharp on HiDPI screens; the properties panel; the
+layer panel's operations (rename, hide, lock, reorder, group); copy, cut,
+paste and duplicate; PNG export; and canvas input routed through the
+session. What is next, and the known architectural debt, is in
+`ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 118 tests, including a randomized check that
+- `cargo test --workspace` — 126 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
@@ -170,10 +169,11 @@ Hand-rolled bezier and boolean code is a multi-month detour with worse numerics.
 ### The editing session lives in core
 
 `graphicgene_core::session::Session` owns the document, the undo journal, the
-selection and whichever interaction is in progress, and every rule tying them
-together: undo while drawing removes a pen anchor, Delete means whatever the
-current mode has selected, Enter and Escape leave a mode, undo prunes the
-selection. It takes typed arguments in document space.
+selection, the tool in hand and whichever interaction is in progress, and
+every rule tying them together: what a press does with each tool, undo while
+drawing removes a pen anchor, Delete means whatever the current mode has
+selected, Enter and Escape leave a mode, undo prunes the selection. It takes
+typed arguments in document space.
 
 A platform shell — `graphicgene-wasm` today, a Tauri app later — only
 translates: ids to strings, pointer positions to document points, results to
@@ -185,9 +185,13 @@ the wasm shell — pointer positions, pick tolerances — and the shell maps the
 into the document through the view, dividing tolerances by the zoom; the
 overlay comes back in screen pixels. The page never converts coordinates.
 
-The web shell still decides which core API a press goes to (`Stage.tsx`:
-tool → pen, path edit or gesture). A native UI would need that routing too;
-moving it into core is on the roadmap.
+Canvas input is routed in core too (`session/tools.rs`): the shell reports
+pointer down, move and up, double-clicks, Escape and Enter, and the session
+decides what they mean — the pen, point editing, a drag, a new shape, a
+marquee — and hands the tool back to Select when a shape is drawn. The page
+keeps only what is its own: panning the view, the cursor, and finding the
+selection handle under a press, since handles are sized in screen pixels
+(see The UI layer); which handle it found travels with the press.
 
 ### IO boundary
 
@@ -216,9 +220,10 @@ The view — zoom and pan — is per-viewer state like the selection: never
 saved, never undone. Its maths is `graphicgene_core::view` (zoom about a
 point, fit, pan kept on whole device pixels) and the wasm shell holds one.
 
-What React does keep is view state — the active tool, the theme, status-bar
-messages — plus caches of core data keyed on a version the core hands out
-(`layersVersion`), never a copy it edits.
+What React does keep is view state — the theme, status-bar messages, which
+row is being renamed — plus caches of core data keyed on a version the core
+hands out (`layersVersion`), never a copy it edits. The tool in hand is not
+among them: it is session state in the core, like the selection.
 
 ### The UI layer: Tailwind v4 + shadcn
 
@@ -430,7 +435,7 @@ Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 869 KB | 338 KB |
+| wasm (wasm-opt applied) | 875 KB | 340 KB |
 | js (React + Radix + app) | 432 KB | 136 KB |
 | css (incl. tw-animate-css) | 44 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |

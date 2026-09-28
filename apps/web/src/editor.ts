@@ -15,6 +15,7 @@
  * too. The core maps them through the view (zoom and pan); nothing on this
  * side converts coordinates.
  */
+import { HIT_RADIUS, type HandleTarget, PICK_RADIUS } from "@/handles";
 import init, { Editor } from "./wasm/graphicgene_wasm.js";
 
 export type LayerRow = {
@@ -127,7 +128,11 @@ export type Overlay = {
   artboard: { rect: readonly [number, number, number, number]; width: number; height: number };
 };
 
-export type ShapeKind = "rect" | "ellipse";
+/** What the pointer does on the canvas. Session state, kept in the core. */
+export type Tool = "select" | "rect" | "ellipse" | "pen";
+
+/** Modifier keys held during a press or a move. */
+export type Keys = { shift: boolean; alt: boolean };
 
 /** An exported image: straight-alpha RGBA rows, ready for `ImageData`. */
 export type ExportedImage = { width: number; height: number; pixels: Uint8ClampedArray<ArrayBuffer> };
@@ -137,12 +142,6 @@ export type DropPlace = "above" | "below" | "inside";
 
 /** A step through the stacking order. */
 export type Arrangement = "forward" | "backward" | "front" | "back";
-
-/** What a select-tool press should turn into; see `selectAt` in the wasm crate. */
-export type PressOutcome = "drag" | "hit" | "miss";
-
-/** What a press while editing a path landed on. */
-export type PathPressOutcome = "handle" | "anchor" | "segment" | "miss";
 
 /** An area of the canvas: x, y, width, height, in device pixels. */
 export type PixelRect = readonly [number, number, number, number];
@@ -208,11 +207,6 @@ export class EditorHandle {
 
   // Selection. Lives in the core because it drives transforms; see lib.rs.
 
-  /** `tolerance`: how far outside a shape still hits it, in screen pixels. */
-  selectAt(x: number, y: number, additive: boolean, tolerance: number): PressOutcome {
-    return this.inner.selectAt(x, y, additive, tolerance) as PressOutcome;
-  }
-
   selectLayer(id: string, additive: boolean): void {
     this.inner.selectLayer(id, additive);
   }
@@ -221,19 +215,11 @@ export class EditorHandle {
     this.inner.selectAll();
   }
 
-  clearSelection(): void {
-    this.inner.clearSelection();
-  }
-
   get selectionCount(): number {
     return this.inner.selectionCount();
   }
 
-  /** Track the node under the pointer; true if that changed. */
-  hover(x: number, y: number, tolerance: number): boolean {
-    return this.inner.hover(x, y, tolerance);
-  }
-
+  /** The pointer left the canvas; true if a hover outline went with it. */
   clearHover(): boolean {
     return this.inner.clearHover();
   }
@@ -242,102 +228,61 @@ export class EditorHandle {
     return this.inner.deleteSelection();
   }
 
+  /** Move the selection or selected points by (dx, dy) document units. */
   nudge(dx: number, dy: number): boolean {
     return this.inner.nudge(dx, dy);
   }
 
-  // Gestures: begin* on press, updateGesture per move, endGesture on release.
-  // The whole drag lands in the journal as one undo step.
+  // Canvas input. The core decides what a press does with the tool in hand
+  // — the pen, point editing, a drag, a new shape, a marquee — so a desktop
+  // shell behaves the same. The page finds selection handles itself, since
+  // they are sized in screen pixels, and says which one a press grabbed.
 
-  beginMove(x: number, y: number): boolean {
-    return this.inner.beginMove(x, y);
+  get tool(): Tool {
+    return this.inner.tool as Tool;
   }
 
-  /** (u, v) picks the handle in unit frame coordinates: corners are 0|1, edge midpoints 0.5. */
-  beginScale(u: number, v: number, x: number, y: number): boolean {
-    return this.inner.beginScale(u, v, x, y);
+  /** Pick up a tool, finishing a pen path or point editing first. */
+  setTool(tool: Tool): void {
+    this.inner.setTool(tool);
   }
 
-  beginRotate(x: number, y: number): boolean {
-    return this.inner.beginRotate(x, y);
+  /** A press at a screen point; `color` is for whatever it starts drawing. */
+  pointerDown(at: Point, keys: Keys, grab: HandleTarget | null, color: Rgba): void {
+    const [u, v] = grab?.kind === "scale" ? [grab.u, grab.v] : [0, 0];
+    this.inner.pointerDown(at[0], at[1], keys.shift, keys.alt, grab?.kind ?? "", u, v, HIT_RADIUS, PICK_RADIUS, new Uint8Array(color));
   }
 
-  beginCreate(shape: ShapeKind, x: number, y: number, color: Rgba): void {
-    this.inner.beginCreate(shape, x, y, new Uint8Array(color));
+  /** A move, pressed or not; true if the overlay changed. */
+  pointerMove(at: Point, keys: Keys): boolean {
+    return this.inner.pointerMove(at[0], at[1], keys.shift, keys.alt, HIT_RADIUS, PICK_RADIUS);
   }
 
-  beginMarquee(x: number, y: number, additive: boolean): void {
-    this.inner.beginMarquee(x, y, additive);
+  pointerUp(): void {
+    this.inner.pointerUp();
   }
 
-  updateGesture(x: number, y: number, shift: boolean, alt: boolean): void {
-    this.inner.updateGesture(x, y, shift, alt);
+  /** The browser took the pointer away: the drag is abandoned. */
+  pointerCancel(): void {
+    this.inner.pointerCancel();
   }
 
-  /** Returns the new node's id when the gesture drew a shape. */
-  endGesture(): string | undefined {
-    return this.inner.endGesture();
+  doubleClick(at: Point): void {
+    this.inner.doubleClick(at[0], at[1], HIT_RADIUS, PICK_RADIUS);
   }
 
-  cancelGesture(): boolean {
-    return this.inner.cancelGesture();
+  /** Back out one level: the drag, the pen path or point editing, the tool, the selection. */
+  escape(): void {
+    this.inner.escape();
   }
 
-  // Pen and path editing. `tolerance` is a pick distance in document units:
-  // a screen distance divided by the zoom.
-
-  /** The first press starts a path; later ones add anchors. */
-  penPress(x: number, y: number, shift: boolean, tolerance: number, color: Rgba): void {
-    this.inner.penPress(x, y, shift, tolerance, new Uint8Array(color));
-  }
-
-  penDrag(x: number, y: number, shift: boolean): void {
-    this.inner.penDrag(x, y, shift);
-  }
-
-  /** Returns the path's id when the press completed it (closed or ended). */
-  penRelease(): string | undefined {
-    return this.inner.penRelease();
-  }
-
-  /** Track the pointer between presses; true while a path is being drawn. */
-  penHover(x: number, y: number, tolerance: number): boolean {
-    return this.inner.penHover(x, y, tolerance);
-  }
-
-  /** Finish the pen path or stop editing a path; true if either was active. */
-  finishMode(): boolean {
-    return this.inner.finishMode();
+  /** Finish the pen path or point editing, or start editing the selected path's points. */
+  enter(): void {
+    this.inner.enter();
   }
 
   get mode(): EditorMode | null {
     return (this.inner.mode() as EditorMode | undefined) ?? null;
-  }
-
-  /** Edit the anchors of the one selected path; false if that is not possible. */
-  beginPathEdit(): boolean {
-    return this.inner.beginPathEdit();
-  }
-
-  pathPress(x: number, y: number, tolerance: number, additive: boolean): PathPressOutcome {
-    return this.inner.pathPress(x, y, tolerance, additive) as PathPressOutcome;
-  }
-
-  pathDrag(x: number, y: number, shift: boolean, alt: boolean): void {
-    this.inner.pathDrag(x, y, shift, alt);
-  }
-
-  pathRelease(): boolean {
-    return this.inner.pathRelease();
-  }
-
-  pathCancelDrag(): void {
-    this.inner.pathCancelDrag();
-  }
-
-  /** Toggles corner/smooth on an anchor; returns whether editing continues. */
-  pathDoubleClick(x: number, y: number, tolerance: number): boolean {
-    return this.inner.pathDoubleClick(x, y, tolerance);
   }
 
   overlay(): Overlay {

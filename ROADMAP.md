@@ -13,7 +13,7 @@ download and reopen project files, export SVG.
 Deployed to GitHub Pages. The hands-on browser pass over everything is
 scheduled after v0.4.
 
-## v0.2 — a real editing surface · in progress
+## v0.2 — a real editing surface · done, `v0.2.0`
 
 The things anyone misses in their first five minutes.
 
@@ -24,7 +24,7 @@ The things anyone misses in their first five minutes.
 | ~~Layer panel operations~~ | **Done 2026-09-28.** Rename, show and hide, lock (the canvas cannot move a locked layer; the panel still can), drag to reorder or into a group, bring forward and send backward, group and ungroup. `core::layers` builds each as one batch; a layer that changes parent keeps its place on the page, and ungrouping folds the group's transform and opacity into what it held. |
 | ~~Clipboard and duplicate~~ | **Done 2026-09-28.** `core::clipboard` turns the selection into marked, versioned JSON with each tree inline and its place on the page, and pastes it with fresh ids — in place, into this document or another. Duplicate copies each node right above its original. The page moves the text through the browser's copy, cut and paste events. |
 | ~~PNG export~~ | **Done 2026-09-28.** `graphicgene_render::export` draws the artboard at 1×, 2× or 3×, with or without the page, as straight-alpha pixels; the browser encodes them (`canvas.toBlob`). A PNG encoder in the wasm cost 53 KB gzipped and nine crates, so tiny-skia is built without it; a native shell can encode with the `png` crate. |
-| **Tool routing in core** | Which core call a press goes to — pen, path edit or a gesture — is still decided in `Stage.tsx`. Moving it into the session as pointer down / move / up per tool means a native shell gets it for free. |
+| ~~Tool routing in core~~ | **Done 2026-09-28.** The session holds the tool and takes pointer down / move / up, double-clicks, Escape and Enter, routing each for the tool in hand (`session/tools.rs`). The page keeps panning, the cursor and the screen-space handle hit-test, whose result travels with the press. |
 
 ## v0.3 — text
 

@@ -6,30 +6,30 @@ import type {
   EditorHandle,
   Frame,
   HandleLine,
+  Keys,
   Overlay,
   PathOverlay,
   PenOverlay,
   Point,
   Rgba,
+  Tool,
 } from "@/editor";
-import { HANDLE_SIZE, HIT_RADIUS, PICK_RADIUS, handleAt, handlesOf } from "@/handles";
-import type { Tool } from "@/ToolDock";
+import { HANDLE_SIZE, handleAt, handlesOf } from "@/handles";
 
 type Props = {
   editor: React.RefObject<EditorHandle | null>;
   revision: number;
   run: <T>(fn: (editor: EditorHandle) => T) => T | undefined;
+  /** From the core; the cursor depends on it. */
   tool: Tool;
   /** Colour for the next shape or pen path. */
   nextFill: () => Rgba;
-  /** Called after a shape or pen path is finished, to hand back to Select. */
-  onShapeDrawn: () => void;
 };
 
-type PointerState = { at: Point; shift: boolean; alt: boolean };
+type PointerState = { at: Point } & Keys;
 
-/** Which core API a press started talking to; its moves and release follow. */
-type DragKind = "pen" | "path" | "gesture" | "pan";
+/** Whether a press went to the core, or pans the view — the one thing the page keeps. */
+type DragKind = "core" | "pan";
 
 /** How long panning must pause before shifted pixels are redrawn exactly. */
 const SETTLE_DELAY = 150;
@@ -56,15 +56,13 @@ function isTextField(target: EventTarget | null): boolean {
  * Everything it hands the core is in screen pixels — pointer positions and
  * pick tolerances alike — and the core maps them through the zoom and pan.
  * All geometry comes back from the core: hit-testing, frames, outlines,
- * anchors, where the artboard is. This component only decides which core
- * call a press goes to.
+ * anchors, where the artboard is. What a press does is the core's rule too
+ * (`pointerDown`); this component pans the view, finds the selection handle
+ * under a press — handles are screen-sized — and picks the cursor.
  */
-export function Stage({ editor, revision, run, tool, nextFill, onShapeDrawn }: Props) {
+export function Stage({ editor, revision, run, tool, nextFill }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragging = useRef<DragKind | null>(null);
-  // What the last press was, so the double-click that ends a pen path is not
-  // then taken as "edit this path".
-  const lastPress = useRef<DragKind | null>(null);
   const lastPointer = useRef<PointerState | null>(null);
   const spaceHeld = useRef(false);
   const settleTimer = useRef<number | undefined>(undefined);
@@ -204,13 +202,9 @@ export function Stage({ editor, revision, run, tool, nextFill, onShapeDrawn }: P
     };
   }, []);
 
-  /** Feed a drag position to whichever core API the press started. */
-  const applyDrag = (kind: DragKind, { at, shift, alt }: PointerState) => {
-    run((ed) => {
-      if (kind === "pen") ed.penDrag(at[0], at[1], shift);
-      else if (kind === "path") ed.pathDrag(at[0], at[1], shift, alt);
-      else if (kind === "gesture") ed.updateGesture(at[0], at[1], shift, alt);
-    });
+  /** Feed a drag position to whatever the press started. */
+  const applyDrag = ({ at, shift, alt }: PointerState) => {
+    run((ed) => ed.pointerMove(at, { shift, alt }));
   };
 
   // Pressing or releasing Shift/Alt mid-drag re-applies the constraint
@@ -228,7 +222,7 @@ export function Stage({ editor, revision, run, tool, nextFill, onShapeDrawn }: P
       // Stops Alt from focusing the browser's menu bar on Windows.
       event.preventDefault();
       lastPointer.current = { at: last.at, shift: event.shiftKey, alt: event.altKey };
-      applyDragRef.current(kind, lastPointer.current);
+      applyDragRef.current(lastPointer.current);
     };
     window.addEventListener("keydown", onModifier);
     window.addEventListener("keyup", onModifier);
@@ -261,34 +255,12 @@ export function Stage({ editor, revision, run, tool, nextFill, onShapeDrawn }: P
       setCursor("grabbing");
       return;
     }
-    if (tool === "pen") {
-      dragging.current = lastPress.current = "pen";
-      run((ed) => ed.penPress(p[0], p[1], shift, PICK_RADIUS, nextFill()));
-      return;
-    }
-    if (mode === "path") {
-      dragging.current = lastPress.current = "path";
-      run((ed) => ed.pathPress(p[0], p[1], PICK_RADIUS, shift));
-      return;
-    }
-    dragging.current = lastPress.current = "gesture";
-    if (tool !== "select") {
-      run((ed) => ed.beginCreate(tool, p[0], p[1], nextFill()));
-      return;
-    }
-    const target = overlay?.frame && !overlay.locked ? handleAt(overlay.frame, p) : null;
-    run((ed) => {
-      if (target?.kind === "scale") {
-        ed.beginScale(target.u, target.v, p[0], p[1]);
-      } else if (target?.kind === "rotate") {
-        ed.beginRotate(p[0], p[1]);
-      } else {
-        const outcome = ed.selectAt(p[0], p[1], shift, HIT_RADIUS);
-        if (outcome === "drag") ed.beginMove(p[0], p[1]);
-        else if (outcome === "miss") ed.beginMarquee(p[0], p[1], shift);
-      }
-      ed.clearHover();
-    });
+    dragging.current = "core";
+    const target =
+      tool === "select" && mode === null && overlay?.frame && !overlay.locked
+        ? handleAt(overlay.frame, p)
+        : null;
+    run((ed) => ed.pointerDown(p, { shift, alt }, target, nextFill()));
     if (target) setCursor(target.cursor);
   };
 
@@ -304,15 +276,13 @@ export function Stage({ editor, revision, run, tool, nextFill, onShapeDrawn }: P
     }
     if (kind) {
       lastPointer.current = { at: p, shift: event.shiftKey, alt: event.altKey };
-      applyDrag(kind, lastPointer.current);
+      applyDrag(lastPointer.current);
       return;
     }
     if (!core) return;
-    if (tool === "pen") {
-      if (core.penHover(p[0], p[1], PICK_RADIUS)) setHoverTick((t) => t + 1);
-    } else if (tool === "select" && mode === null && core.hover(p[0], p[1], HIT_RADIUS)) {
-      setHoverTick((t) => t + 1);
-    }
+    // Unpressed, a move only changes the overlay — a hover outline, the
+    // pen's preview — so it gets its own tick, not a document revision.
+    if (core.pointerMove(p, { shift: event.shiftKey, alt: event.altKey })) setHoverTick((t) => t + 1);
     setCursor(cursorAt(p));
   };
 
@@ -320,37 +290,29 @@ export function Stage({ editor, revision, run, tool, nextFill, onShapeDrawn }: P
     const kind = dragging.current;
     if (!kind) return;
     dragging.current = null;
-    if (kind === "pen") {
-      if (run((ed) => ed.penRelease())) onShapeDrawn();
-    } else if (kind === "path") {
-      run((ed) => ed.pathRelease());
-    } else if (kind === "gesture" && run((ed) => ed.endGesture())) {
-      onShapeDrawn();
-    }
+    if (kind === "core") run((ed) => ed.pointerUp());
     setCursor(cursorAt(toScreen(viewportRef.current, event)));
   };
 
   // A drag the browser takes away (a system gesture, a lost capture) is
-  // abandoned rather than committed half-way. A pen press keeps its anchor.
+  // abandoned rather than committed half-way.
   const onPointerAbort = () => {
     const kind = dragging.current;
     if (!kind) return;
     dragging.current = null;
-    if (kind === "path") run((ed) => ed.pathCancelDrag());
-    else if (kind === "gesture") run((ed) => ed.cancelGesture());
+    if (kind === "core") run((ed) => ed.pointerCancel());
   };
 
   const onPointerLeave = () => {
     if (!dragging.current && core?.clearHover()) setHoverTick((t) => t + 1);
   };
 
-  // Double-click a path to edit its points; while editing, double-click a
-  // point to toggle it between corner and curve, or empty space to stop.
+  // What a double-click means — edit a path's points, toggle one — is the
+  // core's rule; only a double-click while panning is not one.
   const onDoubleClick = (event: React.MouseEvent) => {
-    if (tool !== "select" || lastPress.current === "pen" || spaceHeld.current) return;
+    if (spaceHeld.current) return;
     const p = toScreen(viewportRef.current, event);
-    if (mode === "path") run((ed) => ed.pathDoubleClick(p[0], p[1], PICK_RADIUS));
-    else run((ed) => ed.beginPathEdit());
+    run((ed) => ed.doubleClick(p));
   };
 
   return (

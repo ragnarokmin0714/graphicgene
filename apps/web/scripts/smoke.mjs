@@ -348,4 +348,42 @@ assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to")
   assert.throws(() => exported.exportImage(0, false), /cannot be made/);
 }
 
+// Canvas input routed in core: the page reports presses in screen pixels
+// and the tool in hand decides what they do.
+{
+  const routed = new Editor(W, H);
+  routed.setViewport(128, 128, 1); // the 64px artboard at 50%, from (48, 48)
+  const HIT = 4;
+  const PICK = 6;
+  const press = (x, y, grab = "") => routed.pointerDown(x, y, false, false, grab, 1, 1, HIT, PICK, RED);
+  const moveTo = (x, y) => routed.pointerMove(x, y, false, false, HIT, PICK);
+  routed.setTool("rect");
+  press(58, 58);
+  moveTo(68, 63);
+  routed.pointerUp();
+  assert.equal(routed.tool, "select", "a drawn shape hands back to Select");
+  assert.deepEqual(JSON.parse(routed.overlay()).frame.corners[0], [58, 58], "drawn where pressed, on screen");
+  assert.equal(JSON.parse(routed.layerTree()).length, 1);
+
+  press(62, 60);
+  moveTo(72, 70);
+  routed.pointerUp();
+  assert.deepEqual(JSON.parse(routed.overlay()).frame.corners[0], [68, 68], "a press on it drags it");
+  press(78, 73, "scale");
+  moveTo(88, 83);
+  routed.pointerUp();
+  assert.deepEqual(JSON.parse(routed.overlay()).frame.corners[2], [88, 83], "a grabbed handle scales");
+
+  routed.doubleClick(75, 75, HIT, PICK);
+  assert.equal(JSON.parse(routed.overlay()).mode, "path", "a double-click edits its points");
+  routed.enter();
+  assert.equal(JSON.parse(routed.overlay()).mode, null, "Enter finishes");
+  routed.setTool("pen");
+  routed.escape();
+  assert.equal(routed.tool, "select", "Escape puts the tool down");
+  routed.escape();
+  assert.equal(routed.selectionCount(), 0, "then the selection");
+  assert.throws(() => routed.setTool("brush"), /select, rect, ellipse or pen/);
+}
+
 console.log("smoke: ok");

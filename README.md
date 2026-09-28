@@ -10,7 +10,7 @@ them.
 
 **Try it:** <https://ragnarokmin0714.github.io/graphicgene/>
 
-> **Status: v0.1 preview, v0.2 under way.** Draw rectangles, ellipses and
+> **Status: v0.2 preview.** Draw rectangles, ellipses and
 > bezier paths; select, move, scale and rotate them; edit any path point by
 > point; set position, size, rotation, opacity, fill and stroke in a
 > properties panel; rename, hide, lock, reorder and group layers; copy,

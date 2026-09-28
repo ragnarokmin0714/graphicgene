@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SWATCHES } from "@/color";
-import type { EditorMode } from "@/editor";
+import type { EditorMode, Tool } from "@/editor";
 import { download, encodePng } from "@/files";
 import { Header } from "@/Header";
 import { type LayerActions, LayerPanel } from "@/LayerPanel";
@@ -12,7 +12,7 @@ import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
 import { StatusBar, type ZoomActions } from "@/StatusBar";
 import { readProject, writeProject } from "@/storage";
-import { type Tool, ToolDock } from "@/ToolDock";
+import { ToolDock } from "@/ToolDock";
 import { useEditor } from "@/useEditor";
 
 /**
@@ -67,7 +67,6 @@ export function App() {
     NEW_ARTBOARD.width,
     NEW_ARTBOARD.height,
   );
-  const [tool, setTool] = useState<Tool>("select");
   const [notice, setNotice] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   /**
@@ -91,6 +90,9 @@ export function App() {
   const layerCount = layers.length;
   const selectionCount = core?.selectionCount ?? 0;
   const mode = core?.mode ?? null;
+  // The tool is session state in the core, like the selection: a finished
+  // shape hands back to Select there, not here.
+  const tool: Tool = core?.tool ?? "select";
   // Read every render, since a canvas drag changes it every frame; the
   // object stays the same while nothing in it changes, so the panel is
   // memoised on it.
@@ -242,36 +244,12 @@ export function App() {
       .catch(() => setNotice("Could not encode a PNG in this browser"));
   };
 
-  /** Switching tools finishes a pen path or path edit in progress. */
-  const changeTool = (next: Tool) => {
-    run((editor) => editor.finishMode());
-    setTool(next);
-  };
+  /** Switching tools finishes a pen path or point editing in progress. */
+  const changeTool = (next: Tool) => run((editor) => editor.setTool(next));
 
-  /**
-   * Escape backs out one level: the drag, then the pen path or path edit
-   * (kept, not discarded), then the tool, then the selection.
-   */
-  const escape = () =>
-    run((editor) => {
-      if (editor.cancelGesture()) return;
-      if (editor.finishMode()) {
-        if (tool === "pen") setTool("select");
-        return;
-      }
-      if (tool !== "select") setTool("select");
-      else editor.clearSelection();
-    });
-
-  /** Enter finishes the pen path or path edit, or starts editing the selected path. */
-  const enter = () =>
-    run((editor) => {
-      if (editor.finishMode()) {
-        if (tool === "pen") setTool("select");
-      } else if (tool === "select") {
-        editor.beginPathEdit();
-      }
-    });
+  // What Escape and Enter back out of or finish is the core's rule.
+  const escape = () => run((editor) => editor.escape());
+  const enter = () => run((editor) => editor.enter());
 
   const nudge = (dx: number, dy: number) => run((editor) => editor.nudge(dx, dy));
   const arrows: Shortcut[] = (
@@ -374,7 +352,6 @@ export function App() {
               run={run}
               tool={tool}
               nextFill={nextFill}
-              onShapeDrawn={() => setTool("select")}
             />
             <ToolDock
               tool={tool}

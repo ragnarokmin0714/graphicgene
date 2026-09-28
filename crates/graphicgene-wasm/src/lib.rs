@@ -29,7 +29,9 @@ use graphicgene_core::layers::{Arrange, Drop};
 use graphicgene_core::node::{Node, NodeId, Stroke};
 use graphicgene_core::path_edit::PressOutcome;
 use graphicgene_core::properties::{Properties, Property, Shared};
-use graphicgene_core::session::{Mode, Overlay, SelectOutcome, Session};
+use graphicgene_core::session::{
+    Grab, Mode, Overlay, PEN_STROKE_WIDTH, Pointer, SelectOutcome, Session, Tool,
+};
 use graphicgene_core::view::{MAX_ZOOM, View};
 use graphicgene_render::{
     CpuRenderer, Damage, PixelRect, RenderScene, Renderer, device_area, scroll,
@@ -40,8 +42,6 @@ use tiny_skia::Pixmap;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::prelude::*;
 
-/// Stroke width for paths drawn with the pen, in document units.
-const PEN_STROKE_WIDTH: f64 = 2.0;
 /// Room left around the artboard when fitting it into the viewport, in
 /// screen pixels.
 const FIT_PADDING: f64 = 48.0;
@@ -655,6 +655,110 @@ impl Editor {
         self.session.nudge(Vec2::new(dx, dy)).map_err(to_js)
     }
 
+    // ---- Canvas input ----------------------------------------------------------------
+    //
+    // What the page sends while the pointer is on the canvas; the session
+    // decides what a press starts, for the tool in hand. `hit` and `pick`
+    // are the screen distances that count as on a shape and on a point.
+
+    /// "select", "rect", "ellipse" or "pen".
+    #[wasm_bindgen(getter)]
+    pub fn tool(&self) -> String {
+        match self.session.tool() {
+            Tool::Select => "select",
+            Tool::Rect => "rect",
+            Tool::Ellipse => "ellipse",
+            Tool::Pen => "pen",
+        }
+        .to_owned()
+    }
+
+    /// Pick up a tool, finishing a pen path or point editing first.
+    #[wasm_bindgen(js_name = setTool)]
+    pub fn set_tool(&mut self, tool: &str) -> Result<(), JsError> {
+        let tool = match tool {
+            "select" => Tool::Select,
+            "rect" => Tool::Rect,
+            "ellipse" => Tool::Ellipse,
+            "pen" => Tool::Pen,
+            _ => return Err(JsError::new("tool is select, rect, ellipse or pen")),
+        };
+        self.session.set_tool(tool).map_err(to_js)
+    }
+
+    /// A press. `grab` is what the page's handle hit-test found: "scale"
+    /// with the handle's unit coordinates (u, v), "rotate", or "". `srgb`
+    /// colours whatever the press starts drawing.
+    #[wasm_bindgen(js_name = pointerDown)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn pointer_down(
+        &mut self,
+        x: f64,
+        y: f64,
+        shift: bool,
+        alt: bool,
+        grab: &str,
+        u: f64,
+        v: f64,
+        hit: f64,
+        pick: f64,
+        srgb: &[u8],
+    ) -> Result<(), JsError> {
+        let grab = match grab {
+            "scale" => Some(Grab::Scale { u, v }),
+            "rotate" => Some(Grab::Rotate),
+            _ => None,
+        };
+        let pointer = self.pointer(x, y, shift, alt, hit, pick);
+        self.session
+            .pointer_down(pointer, grab, colour(srgb)?)
+            .map_err(to_js)
+    }
+
+    /// A move, pressed or not. True if what is drawn over the artwork
+    /// changed: always while pressed, and when the hover changes.
+    #[wasm_bindgen(js_name = pointerMove)]
+    pub fn pointer_move(
+        &mut self,
+        x: f64,
+        y: f64,
+        shift: bool,
+        alt: bool,
+        hit: f64,
+        pick: f64,
+    ) -> Result<bool, JsError> {
+        let pointer = self.pointer(x, y, shift, alt, hit, pick);
+        self.session.pointer_move(pointer).map_err(to_js)
+    }
+
+    #[wasm_bindgen(js_name = pointerUp)]
+    pub fn pointer_up(&mut self) -> Result<(), JsError> {
+        self.session.pointer_up().map_err(to_js)
+    }
+
+    /// The browser took the pointer away: abandon the drag.
+    #[wasm_bindgen(js_name = pointerCancel)]
+    pub fn pointer_cancel(&mut self) -> Result<(), JsError> {
+        self.session.pointer_cancel().map_err(to_js)
+    }
+
+    #[wasm_bindgen(js_name = doubleClick)]
+    pub fn double_click(&mut self, x: f64, y: f64, hit: f64, pick: f64) -> Result<(), JsError> {
+        let pointer = self.pointer(x, y, false, false, hit, pick);
+        self.session.double_click(pointer).map_err(to_js)
+    }
+
+    /// Back out one level: the drag, the pen path or point editing, the
+    /// tool, the selection.
+    pub fn escape(&mut self) -> Result<(), JsError> {
+        self.session.escape().map_err(to_js)
+    }
+
+    /// Finish the pen path or point editing, or start editing points.
+    pub fn enter(&mut self) -> Result<(), JsError> {
+        self.session.enter().map_err(to_js)
+    }
+
     // ---- Gestures ------------------------------------------------------------------
 
     #[wasm_bindgen(js_name = beginMove)]
@@ -862,6 +966,15 @@ impl Editor {
             return Err(JsError::new("unknown node id"));
         }
         Ok(id)
+    }
+
+    fn pointer(&self, x: f64, y: f64, shift: bool, alt: bool, hit: f64, pick: f64) -> Pointer {
+        Pointer {
+            point: self.point(x, y),
+            modifiers: Modifiers { shift, alt },
+            hit_tolerance: self.distance(hit),
+            pick_tolerance: self.distance(pick),
+        }
     }
 
     /// A screen point, in the document.

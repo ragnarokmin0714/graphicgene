@@ -18,6 +18,8 @@
 //! One interaction at a time: starting anything else — a press, undo, a new
 //! selection — first abandons a property edit left open, as it does a drag.
 
+mod tools;
+
 use std::fmt;
 
 use crate::clipboard;
@@ -36,6 +38,9 @@ use crate::pen::PenSession;
 use crate::project::Project;
 use crate::properties::{self, Properties, Property, PropertyEdit};
 use crate::selection::Selection;
+
+use tools::Route;
+pub use tools::{Grab, PEN_STROKE_WIDTH, Pointer, Tool};
 
 /// An interaction that outlives a single press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +147,13 @@ pub struct Session {
     /// A properties-panel change being previewed. Never together with a
     /// gesture or the pen.
     property_edit: Option<PropertyEdit>,
+    /// What the pointer does on the canvas.
+    tool: Tool,
+    /// Where the moves and release of the press in progress go.
+    route: Option<Route>,
+    /// Where the last press went, so the double-click that ends a pen path
+    /// is not taken as one that edits it.
+    last_route: Option<Route>,
     /// Bumped whenever a different document is loaded.
     generation: u64,
 }
@@ -256,6 +268,7 @@ impl Session {
         self.pen = None;
         self.path_edit = None;
         self.property_edit = None;
+        self.route = None;
         self.hover = None;
         self.document = project.document;
         self.journal.clear();

@@ -35,8 +35,8 @@ export function Header({ onOpen, onDownload, onExportSvg, onExportPng }: Props) 
     <header className="bg-card h-bar flex shrink-0 items-center gap-1 border-b px-3">
       <Logo className="size-5" />
       <span className="ml-1.5 text-[13px] font-semibold tracking-tight">graphicgene</span>
-      <span className="bg-muted text-muted-foreground text-label ml-2 rounded px-1.5 py-px font-medium">
-        v0.1 preview
+      <span className="bg-muted text-muted-foreground text-label ml-2 rounded px-1.5 py-px font-medium tabular-nums">
+        v{__APP_VERSION__} preview
       </span>
 
       <div className="ml-auto flex items-center gap-0.5">
