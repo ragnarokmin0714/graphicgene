@@ -129,6 +129,9 @@ export type Overlay = {
 
 export type ShapeKind = "rect" | "ellipse";
 
+/** An exported image: straight-alpha RGBA rows, ready for `ImageData`. */
+export type ExportedImage = { width: number; height: number; pixels: Uint8ClampedArray<ArrayBuffer> };
+
 /** Where dragged layers land, relative to a row: in front of it, behind it, or into it. */
 export type DropPlace = "above" | "below" | "inside";
 
@@ -581,6 +584,23 @@ export class EditorHandle {
   /** The artwork as SVG text, the size of the artboard; the caller decides where it goes. */
   exportSvg(): string {
     return this.inner.exportSvg();
+  }
+
+  /**
+   * The artboard drawn at `scale` pixels per unit, as straight-alpha RGBA
+   * for the page to encode; `transparent` leaves out the page. A copy.
+   */
+  exportImage(scale: number, transparent: boolean): ExportedImage {
+    const image = this.inner.exportImage(scale, transparent);
+    try {
+      return {
+        width: image.width,
+        height: image.height,
+        pixels: image.pixels() as Uint8ClampedArray<ArrayBuffer>,
+      };
+    } finally {
+      image.free();
+    }
   }
 
   /** The canvas's size in device pixels: the viewport, which its backing store must match. */

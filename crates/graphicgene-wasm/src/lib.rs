@@ -37,6 +37,7 @@ use graphicgene_render::{
 use serde_json::{Value, json};
 use slotmap::{Key, KeyData};
 use tiny_skia::Pixmap;
+use wasm_bindgen::Clamped;
 use wasm_bindgen::prelude::*;
 
 /// Stroke width for paths drawn with the pen, in document units.
@@ -309,6 +310,17 @@ impl Editor {
     #[wasm_bindgen(js_name = exportSvg)]
     pub fn export_svg(&self) -> Result<String, JsError> {
         self.session.export_svg().map_err(to_js)
+    }
+
+    /// The artboard drawn at `scale` pixels per document unit, for the page
+    /// to encode — the browser's PNG encoder is free, one in the wasm is
+    /// not. With `transparent`, without the white page. An export is not a
+    /// frame, so its pixels cross the boundary as a copy.
+    #[wasm_bindgen(js_name = exportImage)]
+    pub fn export_image(&self, scale: f64, transparent: bool) -> Result<ExportedImage, JsError> {
+        let image = graphicgene_render::export::image(self.session.document(), scale, transparent)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(ExportedImage(image))
     }
 
     // ---- Pixels ------------------------------------------------------------------
@@ -943,6 +955,28 @@ fn overlay_json(overlay: &Overlay, to_screen: Affine, artboard: Size) -> Value {
         });
     }
     value
+}
+
+/// An exported image: straight-alpha RGBA rows, ready for `ImageData`.
+#[wasm_bindgen]
+pub struct ExportedImage(graphicgene_render::export::Image);
+
+#[wasm_bindgen]
+impl ExportedImage {
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> u32 {
+        self.0.width
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> u32 {
+        self.0.height
+    }
+
+    /// A copy of the pixels, as a `Uint8ClampedArray`.
+    pub fn pixels(&self) -> Clamped<Vec<u8>> {
+        Clamped(self.0.pixels.clone())
+    }
 }
 
 fn properties_json(p: &Properties) -> Value {

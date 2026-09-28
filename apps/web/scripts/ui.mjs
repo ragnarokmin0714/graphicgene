@@ -153,6 +153,14 @@ window.HTMLCanvasElement.prototype.getContext = function () {
   };
 };
 
+// Encoding: jsdom has none, so a canvas "encodes" to a note of its size
+// and first pixel — enough to check what reached it.
+window.HTMLCanvasElement.prototype.toBlob = function (callback, type) {
+  const { pixels } = screenOf(this);
+  const summary = { type, width: this.width, height: this.height, first: Array.from(pixels.slice(0, 4)) };
+  setTimeout(() => callback(new Blob([JSON.stringify(summary)], { type })), 0);
+};
+
 // The wasm module is fetched from a file: URL, which Node's fetch refuses.
 const nodeFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
@@ -804,13 +812,30 @@ try {
   await checkScreen("after the clipboard");
 
   section("Files");
-  await press([...document.querySelectorAll("header button")].find((b) => b.textContent.includes("Export SVG")));
+  // Radix opens a menu on pointerdown, not on click.
+  const exportAs = async (label) => {
+    const trigger = [...document.querySelectorAll("header button")].find((b) => b.textContent === "Export");
+    await fire(trigger, new window.PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 5 }));
+    // An item's text runs on into its shortcut: "SVGCtrl Shift E", "PNG2×".
+    await press([...document.querySelectorAll('[role="menuitem"]')].find((item) => item.textContent.startsWith(label)));
+  };
+  await exportAs("SVG");
   const svg = downloads.at(-1);
-  check(svg.filename === "graphicgene.svg" && svg.type === "image/svg+xml", "Export SVG downloads graphicgene.svg");
+  check(svg.filename === "graphicgene.svg" && svg.type === "image/svg+xml", "Export → SVG downloads graphicgene.svg");
   const parsed = new window.DOMParser().parseFromString(await svg.text(), "image/svg+xml");
   check(!parsed.querySelector("parsererror"), "which is well-formed");
   check(parsed.querySelectorAll("path").length === layerCount(), "with one <path> per layer");
   check(parsed.documentElement.getAttribute("width") === "800", "and the artboard's size");
+
+  await exportAs("PNG2×");
+  await wait(20);
+  const png = downloads.at(-1);
+  const encoded = JSON.parse(await png.text());
+  check(png.filename === "graphicgene@2x.png" && png.type === "image/png", "Export → PNG 2× downloads graphicgene@2x.png");
+  check(
+    encoded.width === 1600 && encoded.height === 1200 && encoded.first.join() === "255,255,255,255",
+    `encoded by the browser at twice the artboard's size, page and all (${encoded.width} × ${encoded.height})`,
+  );
 
   const project = await downloadProject();
   check(

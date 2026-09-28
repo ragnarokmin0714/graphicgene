@@ -15,5 +15,8 @@ kurbo.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 slotmap.workspace = true
-tiny-skia = "0.12"
+# No `png-format`: encoding is the platform's job (see export.rs), and it
+# would bring nine crates (png, flate2 and their deflate stack) and 53 KB of
+# gzipped wasm.
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 wasm-bindgen = "0.2"

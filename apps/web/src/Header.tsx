@@ -1,6 +1,15 @@
-import { FileDown, FolderOpen, ImageDown } from "lucide-react";
+import { ChevronDown, FileDown, FolderOpen, ImageDown } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { KbdGroup } from "@/components/ui/kbd";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { IconButton } from "@/IconButton";
@@ -11,10 +20,17 @@ import { ThemeMenu } from "@/ThemeMenu";
 type Props = {
   onOpen: () => void;
   onDownload: () => void;
-  onExport: () => void;
+  onExportSvg: () => void;
+  /** `scale` pixels per document unit; `transparent` leaves out the white page. */
+  onExportPng: (scale: number, transparent: boolean) => void;
 };
 
-export function Header({ onOpen, onDownload, onExport }: Props) {
+/** PNG scales offered, as in every design tool's export menu. */
+const PNG_SCALES = [1, 2, 3];
+
+export function Header({ onOpen, onDownload, onExportSvg, onExportPng }: Props) {
+  // A per-viewer choice, like the theme: not part of the document.
+  const [transparent, setTransparent] = useState(false);
   return (
     <header className="bg-card h-bar flex shrink-0 items-center gap-1 border-b px-3">
       <Logo className="size-5" />
@@ -33,18 +49,45 @@ export function Header({ onOpen, onDownload, onExport }: Props) {
         <IconButton label="Download project file" icon={<FileDown />} onClick={onDownload} />
         <Separator orientation="vertical" className="mx-1.5 !h-4" />
         {/* The one primary action in the chrome: getting the artwork out. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="default" onClick={onExport}>
-              <ImageDown />
-              Export SVG
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6}>
-            Download the artwork as SVG
-            <KbdGroup keys={[MOD, SHIFT, "E"]} />
-          </TooltipContent>
-        </Tooltip>
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button variant="default">
+                  <ImageDown />
+                  Export
+                  <ChevronDown className="-mr-0.5 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              Download the artwork as SVG or PNG
+            </TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="min-w-52">
+            <DropdownMenuItem onSelect={onExportSvg}>
+              SVG
+              <DropdownMenuShortcut>
+                {MOD} {SHIFT} E
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {PNG_SCALES.map((scale) => (
+              <DropdownMenuItem key={scale} onSelect={() => onExportPng(scale, transparent)}>
+                PNG
+                <DropdownMenuShortcut>{scale}×</DropdownMenuShortcut>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuCheckboxItem
+              checked={transparent}
+              onCheckedChange={(checked) => setTransparent(checked === true)}
+              // Ticking it keeps the menu open, so a PNG can follow.
+              onSelect={(event) => event.preventDefault()}
+            >
+              Transparent background
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Separator orientation="vertical" className="mx-1.5 !h-4" />
         <ThemeMenu />
       </div>

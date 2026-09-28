@@ -2,6 +2,7 @@
 //! CPU backend.
 
 pub mod cpu;
+pub mod export;
 pub mod renderer;
 pub mod scene;
 
@@ -18,4 +19,12 @@ pub enum RenderError {
 
     #[error("render target is {width}x{height}, which is not a valid pixmap size")]
     BadTargetSize { width: u32, height: u32 },
+
+    #[error(
+        "an export of {width:.0} × {height:.0} pixels cannot be made: at most \
+         {side} a side and {mega} megapixels",
+        side = export::MAX_SIDE,
+        mega = export::MAX_PIXELS / (1024 * 1024)
+    )]
+    ExportSize { width: f64, height: f64 },
 }

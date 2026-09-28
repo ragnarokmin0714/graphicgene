@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SWATCHES } from "@/color";
 import type { EditorMode } from "@/editor";
-import { download } from "@/files";
+import { download, encodePng } from "@/files";
 import { Header } from "@/Header";
 import { type LayerActions, LayerPanel } from "@/LayerPanel";
 import { type PropertyActions, PropertiesPanel } from "@/PropertiesPanel";
@@ -22,6 +22,7 @@ import { useEditor } from "@/useEditor";
 const NEW_ARTBOARD = { width: 800, height: 600 };
 const PROJECT_FILE = "graphicgene-project.json";
 const SVG_FILE = "graphicgene.svg";
+const PNG_FILE = "graphicgene.png";
 /** Quiet time after the last edit before autosaving, in ms. */
 const AUTOSAVE_DELAY = 800;
 /** Arrow-key nudge, and with Shift held, in document units. */
@@ -232,6 +233,15 @@ export function App() {
   const exportSvg = () =>
     run((editor) => download(SVG_FILE, editor.exportSvg(), "image/svg+xml"));
 
+  const exportPng = (scale: number, transparent: boolean) => {
+    const image = run((editor) => editor.exportImage(scale, transparent));
+    if (!image) return;
+    const filename = scale === 1 ? PNG_FILE : PNG_FILE.replace(".png", `@${scale}x.png`);
+    encodePng(image)
+      .then((png) => download(filename, png, "image/png"))
+      .catch(() => setNotice("Could not encode a PNG in this browser"));
+  };
+
   /** Switching tools finishes a pen path or path edit in progress. */
   const changeTool = (next: Tool) => {
     run((editor) => editor.finishMode());
@@ -326,7 +336,8 @@ export function App() {
         <Header
           onOpen={() => fileInput.current?.click()}
           onDownload={downloadProject}
-          onExport={exportSvg}
+          onExportSvg={exportSvg}
+          onExportPng={exportPng}
         />
         <input
           ref={fileInput}

@@ -26,19 +26,19 @@ with zoom and pan: the canvas now covers the whole stage in device pixels, so
 it is sharp on HiDPI screens. The properties panel followed the same day:
 position, size, rotation, opacity, fill and stroke, typed, stepped or
 scrubbed, each change one undo step. Then the layer panel's operations:
-rename, hide, lock, drag to reorder, group and ungroup; and copy, cut,
-paste and duplicate. What is next, and the known architectural debt, is in
-`ROADMAP.md`.
+rename, hide, lock, drag to reorder, group and ungroup; copy, cut, paste
+and duplicate; and PNG export. What is next, and the known architectural
+debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 115 tests, including a randomized check that
+- `cargo test --workspace` — 118 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 162
+- `pnpm ui` — the React app driven in jsdom against the real core: 164
   checks, including zoom and pan, the properties panel and its colour
   picker, the layer panel's rename, toggles and drag to reorder, the
   clipboard, and that the canvas equals a full redraw of the same document
@@ -192,7 +192,14 @@ moving it into core is on the roadmap.
 ### IO boundary
 
 **Core crates perform no IO.** They produce and consume bytes; the app layer
-does storage. This is not a style preference: IndexedDB is async and `std::fs`
+does storage.
+
+Image export stops one step earlier, at pixels
+(`graphicgene_render::export::image`): encoding PNG is the platform's job.
+A browser has an encoder for free (`canvas.toBlob`); carrying one in the
+wasm cost 53 KB gzipped and nine crates, which is why tiny-skia is built
+without its `png-format` feature. A native shell encodes with the `png`
+crate. This is not a style preference: IndexedDB is async and `std::fs`
 is sync, and a core that assumes either one cannot run on the other platform.
 
 ### State ownership
@@ -423,9 +430,9 @@ Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 807 KB | 316 KB |
-| js (React + Radix + app) | 419 KB | 133 KB |
-| css (incl. tw-animate-css) | 42 KB | 8 KB |
+| wasm (wasm-opt applied) | 869 KB | 338 KB |
+| js (React + Radix + app) | 432 KB | 136 KB |
+| css (incl. tw-animate-css) | 44 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |
 
 The browser fetches only the Inter subsets whose unicode-range the page uses,

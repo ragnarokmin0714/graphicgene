@@ -8,5 +8,8 @@ description = "RenderScene, Renderer trait and the CPU renderer for graphicgene"
 [dependencies]
 graphicgene-core.workspace = true
 kurbo.workspace = true
-tiny-skia = "0.12"
+# No `png-format`: encoding is the platform's job (see export.rs), and it
+# would bring nine crates (png, flate2 and their deflate stack) and 53 KB of
+# gzipped wasm.
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 thiserror.workspace = true

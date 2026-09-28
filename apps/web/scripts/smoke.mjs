@@ -331,4 +331,21 @@ assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to")
   assert.equal(target.copy(), undefined, "nothing selected, nothing copied");
 }
 
+// Image export: the artboard at a scale, as straight-alpha pixels for the
+// page to encode.
+{
+  const exported = new Editor(W, H);
+  exported.addRect(0, 0, 10, 10, RED);
+  const image = exported.exportImage(2, false);
+  const pixels = image.pixels();
+  assert.deepEqual([image.width, image.height, pixels.length], [128, 128, 128 * 128 * 4], "twice the artboard");
+  assert.ok(pixels instanceof Uint8ClampedArray, "ready for ImageData");
+  const at = (x, y) => Array.from(pixels.slice((y * 128 + x) * 4, (y * 128 + x) * 4 + 4));
+  assert.deepEqual(at(10, 10), [255, 0, 0, 255], "the rect, at twice its size");
+  assert.deepEqual(at(30, 30), [255, 255, 255, 255], "the page");
+  assert.deepEqual(exported.exportImage(1, true).pixels().slice(60 * 4, 60 * 4 + 4), new Uint8ClampedArray(4), "no page");
+  image.free();
+  assert.throws(() => exported.exportImage(0, false), /cannot be made/);
+}
+
 console.log("smoke: ok");

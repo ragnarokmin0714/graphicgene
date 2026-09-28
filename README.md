@@ -17,7 +17,7 @@ them.
 > paste and duplicate; zoom and pan, sharp on HiDPI screens; undo
 > everything.
 > Work autosaves in the browser, project files can be downloaded and
-> reopened, and the artwork exports as SVG. What comes next is in
+> reopened, and the artwork exports as SVG or PNG. What comes next is in
 > [`ROADMAP.md`](ROADMAP.md).
 
 ## Using it
@@ -42,6 +42,7 @@ them.
 | `Ctrl/⌘ +` `−` `0`, `Shift 1` | Zoom in, out, to 100%, to fit the artboard |
 | `Ctrl/⌘ Z`, `Ctrl/⌘ Shift Z` | Undo, redo |
 | `Ctrl/⌘ O`, `Ctrl/⌘ Shift E` | Open a project file, export SVG |
+| Export menu | SVG, or PNG at 1×, 2× or 3×, with or without the white page |
 
 ## How it is built
 
