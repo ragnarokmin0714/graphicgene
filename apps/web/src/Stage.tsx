@@ -243,7 +243,7 @@ export function Stage({ editor, revision, run, tool, nextFill, onShapeDrawn }: P
     if (tool === "pen") return PEN_CURSOR;
     if (tool !== "select") return "crosshair";
     if (mode === "path") return "default";
-    const target = overlay?.frame ? handleAt(overlay.frame, p) : null;
+    const target = overlay?.frame && !overlay.locked ? handleAt(overlay.frame, p) : null;
     return target?.cursor ?? "default";
   };
 
@@ -276,7 +276,7 @@ export function Stage({ editor, revision, run, tool, nextFill, onShapeDrawn }: P
       run((ed) => ed.beginCreate(tool, p[0], p[1], nextFill()));
       return;
     }
-    const target = overlay?.frame ? handleAt(overlay.frame, p) : null;
+    const target = overlay?.frame && !overlay.locked ? handleAt(overlay.frame, p) : null;
     run((ed) => {
       if (target?.kind === "scale") {
         ed.beginScale(target.u, target.v, p[0], p[1]);
@@ -399,15 +399,19 @@ function OverlayLayer({ overlay }: { overlay: Overlay }) {
           outlines.map((d, i) => (
             <path key={i} d={d} fill="none" strokeWidth={1} className="stroke-primary/70" />
           ))}
+        {/* A locked selection shows where it is, dashed and without
+            handles: the canvas cannot move it. */}
         {frame && (
           <polygon
             points={frame.corners.map((c) => c.join(",")).join(" ")}
             fill="none"
             strokeWidth={1}
+            strokeDasharray={overlay.locked ? "4 3" : undefined}
             className="stroke-primary"
           />
         )}
         {frame &&
+          !overlay.locked &&
           handlesOf(frame).map((handle) => (
             <rect
               key={`${handle.u},${handle.v}`}

@@ -118,6 +118,8 @@ export type Overlay = {
   hover: string | null;
   /** x0, y0, x1, y1 */
   marquee: readonly [number, number, number, number] | null;
+  /** Something selected is locked: its frame shows, but it has no handles. */
+  locked: boolean;
   gesture: "move" | "scale" | "rotate" | "create" | "marquee" | null;
   pen?: PenOverlay;
   path?: PathOverlay;
@@ -126,6 +128,12 @@ export type Overlay = {
 };
 
 export type ShapeKind = "rect" | "ellipse";
+
+/** Where dragged layers land, relative to a row: in front of it, behind it, or into it. */
+export type DropPlace = "above" | "below" | "inside";
+
+/** A step through the stacking order. */
+export type Arrangement = "forward" | "backward" | "front" | "back";
 
 /** What a select-tool press should turn into; see `selectAt` in the wasm crate. */
 export type PressOutcome = "drag" | "hit" | "miss";
@@ -481,6 +489,49 @@ export class EditorHandle {
   /** Change the selection as one undo step: a typed value, a picked swatch. */
   setProperty(change: PropertyChange): boolean {
     return this.inner.setProperty(JSON.stringify(change));
+  }
+
+  // Layers: each call is one undo step.
+
+  /** False for a blank name or the one it has. */
+  rename(id: string, name: string): boolean {
+    return this.inner.rename(id, name);
+  }
+
+  setVisible(id: string, visible: boolean): boolean {
+    return this.inner.setVisible(id, visible);
+  }
+
+  setLocked(id: string, locked: boolean): boolean {
+    return this.inner.setLocked(id, locked);
+  }
+
+  /** Hide the selection, or show it if all of it is hidden. */
+  toggleVisible(): boolean {
+    return this.inner.toggleVisible();
+  }
+
+  /** Lock the selection, or unlock it if all of it is locked. */
+  toggleLocked(): boolean {
+    return this.inner.toggleLocked();
+  }
+
+  /** Move the selected layers to where they were dropped in the panel. */
+  moveSelection(id: string, place: DropPlace): boolean {
+    return this.inner.moveSelection(id, place);
+  }
+
+  arrange(how: Arrangement): boolean {
+    return this.inner.arrange(how);
+  }
+
+  /** Put the selection in a new group, which becomes the selection. */
+  group(): boolean {
+    return this.inner.group();
+  }
+
+  ungroup(): boolean {
+    return this.inner.ungroup();
   }
 
   layers(): LayerRow[] {

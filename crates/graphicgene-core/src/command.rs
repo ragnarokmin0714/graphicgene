@@ -47,6 +47,10 @@ pub enum Command {
         id: NodeId,
         visible: bool,
     },
+    SetLocked {
+        id: NodeId,
+        locked: bool,
+    },
     Rename {
         id: NodeId,
         name: String,
@@ -124,6 +128,16 @@ impl Command {
                 Ok(Command::SetVisible {
                     id: *id,
                     visible: previous,
+                })
+            }
+
+            Command::SetLocked { id, locked } => {
+                let node = doc.get_mut(*id)?;
+                let previous = node.common.locked;
+                node.common.locked = *locked;
+                Ok(Command::SetLocked {
+                    id: *id,
+                    locked: previous,
                 })
             }
 
@@ -211,6 +225,7 @@ impl Command {
             | Command::SetTransform { id, .. }
             | Command::SetOpacity { id, .. }
             | Command::SetVisible { id, .. }
+            | Command::SetLocked { id, .. }
             | Command::Rename { id, .. }
             | Command::SetFill { id, .. }
             | Command::SetStroke { id, .. }

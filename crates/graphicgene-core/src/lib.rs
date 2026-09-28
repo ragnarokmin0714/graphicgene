@@ -16,6 +16,7 @@ pub mod error;
 pub mod geom;
 pub mod gesture;
 pub mod hit;
+pub mod layers;
 pub mod layout;
 pub mod node;
 pub mod path_edit;

@@ -25,6 +25,7 @@ use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::Command;
 use graphicgene_core::geom::{Affine, BezPath, Ellipse, Point, Rect, Shape, Size, Vec2};
 use graphicgene_core::gesture::{Modifiers, ShapeKind, TransformKind};
+use graphicgene_core::layers::{Arrange, Drop};
 use graphicgene_core::node::{Node, NodeId, Stroke};
 use graphicgene_core::path_edit::PressOutcome;
 use graphicgene_core::properties::{Properties, Property, Shared};
@@ -425,6 +426,74 @@ impl Editor {
         to_json(&Value::Array(rows))
     }
 
+    /// Rename a layer; false for a blank name or the one it has.
+    pub fn rename(&mut self, id: &str, name: &str) -> Result<bool, JsError> {
+        let id = self.id(id)?;
+        self.session.rename(id, name).map_err(to_js)
+    }
+
+    /// Show or hide one layer: the eye on its row.
+    #[wasm_bindgen(js_name = setVisible)]
+    pub fn set_visible(&mut self, id: &str, visible: bool) -> Result<bool, JsError> {
+        let id = self.id(id)?;
+        self.session.set_visible(&[id], visible).map_err(to_js)
+    }
+
+    /// Lock or unlock one layer: the lock on its row.
+    #[wasm_bindgen(js_name = setLocked)]
+    pub fn set_locked(&mut self, id: &str, locked: bool) -> Result<bool, JsError> {
+        let id = self.id(id)?;
+        self.session.set_locked(&[id], locked).map_err(to_js)
+    }
+
+    /// Hide the selection, or show it if all of it is hidden.
+    #[wasm_bindgen(js_name = toggleVisible)]
+    pub fn toggle_visible(&mut self) -> Result<bool, JsError> {
+        self.session.toggle_visible().map_err(to_js)
+    }
+
+    /// Lock the selection, or unlock it if all of it is locked.
+    #[wasm_bindgen(js_name = toggleLocked)]
+    pub fn toggle_locked(&mut self) -> Result<bool, JsError> {
+        self.session.toggle_locked().map_err(to_js)
+    }
+
+    /// Move the selected layers where they were dropped: `place` is
+    /// "above" or "below" the row `id`, or "inside" it, a group.
+    #[wasm_bindgen(js_name = moveSelection)]
+    pub fn move_selection(&mut self, id: &str, place: &str) -> Result<bool, JsError> {
+        let id = self.id(id)?;
+        let drop = match place {
+            "above" => Drop::Above(id),
+            "below" => Drop::Below(id),
+            "inside" => Drop::Inside(id),
+            _ => return Err(JsError::new("place is above, below or inside")),
+        };
+        self.session.move_selection(drop).map_err(to_js)
+    }
+
+    /// "forward", "backward", "front" or "back".
+    pub fn arrange(&mut self, how: &str) -> Result<bool, JsError> {
+        let arrange = match how {
+            "forward" => Arrange::Forward,
+            "backward" => Arrange::Backward,
+            "front" => Arrange::ToFront,
+            "back" => Arrange::ToBack,
+            _ => return Err(JsError::new("arrange forward, backward, front or back")),
+        };
+        self.session.arrange(arrange).map_err(to_js)
+    }
+
+    /// Put the selection in a new group, which becomes the selection.
+    pub fn group(&mut self) -> Result<bool, JsError> {
+        self.session.group_selection().map_err(to_js)
+    }
+
+    /// Dissolve the selected groups into their parents.
+    pub fn ungroup(&mut self) -> Result<bool, JsError> {
+        self.session.ungroup_selection().map_err(to_js)
+    }
+
     // ---- Properties panel ----------------------------------------------------------
     //
     // Values here are what the user types — document units, degrees — not
@@ -822,6 +891,7 @@ fn overlay_json(overlay: &Overlay, to_screen: Affine, artboard: Size) -> Value {
         "outlines": overlay.outlines.iter().map(path).collect::<Vec<_>>(),
         "hover": overlay.hover.as_ref().map(path),
         "marquee": overlay.marquee.map(rect),
+        "locked": overlay.locked,
         "gesture": overlay.gesture,
         "artboard": {
             "rect": rect(Rect::new(0.0, 0.0, artboard.width, artboard.height)),

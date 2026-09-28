@@ -27,6 +27,7 @@ use crate::error::Result;
 use crate::geom::{Affine, BezPath, Point, Rect, Size, Vec2};
 use crate::gesture::{self, Frame, Gesture, Modifiers, ShapeKind, TransformKind};
 use crate::hit;
+use crate::layers::{self, Arrange, Drop};
 use crate::layout;
 use crate::node::{Node, NodeId, NodeKind, Stroke};
 use crate::path_edit::{DeleteOutcome, EditView, PathEdit, PressOutcome};
@@ -114,6 +115,9 @@ pub struct Overlay {
     /// Outline of the node under the pointer, unless it is selected.
     pub hover: Option<BezPath>,
     pub marquee: Option<Rect>,
+    /// Something selected is locked, itself or through a group: the frame
+    /// shows where it is, but the canvas cannot move it.
+    pub locked: bool,
     /// What the drag in progress does: "move", "scale", "rotate", "create"
     /// or "marquee".
     pub gesture: Option<&'static str>,
@@ -426,7 +430,7 @@ impl Session {
         if let Some(edit) = self.path_edit.as_mut() {
             return edit.nudge(&mut self.document, &mut self.journal, offset);
         }
-        if self.selection.is_empty() {
+        if self.selection.is_empty() || self.selection_locked()? {
             return Ok(false);
         }
         let command = gesture::world_delta_command(
@@ -445,10 +449,13 @@ impl Session {
     // drag previews in the document and lands in the journal as one step.
 
     /// Start moving, scaling or rotating the selection. Returns false if the
-    /// selection has nothing to manipulate.
+    /// selection has nothing to manipulate, or something in it is locked.
     pub fn begin_transform(&mut self, kind: TransformKind, point: Point) -> Result<bool> {
         self.cancel_gesture()?;
         self.cancel_property()?;
+        if self.selection_locked()? {
+            return Ok(false);
+        }
         self.gesture = Gesture::transform(&self.document, &self.selection, kind, point)?;
         Ok(self.gesture.is_some())
     }
@@ -589,9 +596,9 @@ impl Session {
     // ---- Path editing ----------------------------------------------------------
 
     /// Start editing the anchors of the selected path. Returns false unless
-    /// exactly one vector node is selected.
+    /// exactly one vector node is selected, and it is not locked.
     pub fn begin_path_edit(&mut self) -> Result<bool> {
-        if self.pen.is_some() {
+        if self.pen.is_some() || self.selection_locked()? {
             return Ok(false);
         }
         let &[id] = self.selection.ids() else {
@@ -722,6 +729,123 @@ impl Session {
         self.commit_property()
     }
 
+    // ---- Layers --------------------------------------------------------------------
+    //
+    // What the layer panel does, and the shortcuts that do the same. Each is
+    // one undo step, and first ends whatever else was going on — finishing a
+    // pen path, as a click on a layer row does.
+
+    /// Rename a node. Surrounding space is trimmed; a blank name, or the one
+    /// it has, changes nothing.
+    pub fn rename(&mut self, id: NodeId, name: &str) -> Result<bool> {
+        self.end_interaction()?;
+        let name = name.trim();
+        if name.is_empty() || self.document.get(id)?.common.name == name {
+            return Ok(false);
+        }
+        self.execute(Command::Rename {
+            id,
+            name: name.to_owned(),
+        })?;
+        Ok(true)
+    }
+
+    pub fn set_visible(&mut self, ids: &[NodeId], visible: bool) -> Result<bool> {
+        self.end_interaction()?;
+        let mut commands = Vec::new();
+        for &id in ids {
+            if self.document.get(id)?.common.visible != visible {
+                commands.push(Command::SetVisible { id, visible });
+            }
+        }
+        self.execute_all(commands)
+    }
+
+    pub fn set_locked(&mut self, ids: &[NodeId], locked: bool) -> Result<bool> {
+        self.end_interaction()?;
+        let mut commands = Vec::new();
+        for &id in ids {
+            if self.document.get(id)?.common.locked != locked {
+                commands.push(Command::SetLocked { id, locked });
+            }
+        }
+        self.execute_all(commands)
+    }
+
+    /// Hide the selection — or show it, when all of it is hidden already.
+    pub fn toggle_visible(&mut self) -> Result<bool> {
+        let ids = self.selection.ids().to_vec();
+        let mut all_hidden = true;
+        for &id in &ids {
+            all_hidden &= !self.document.get(id)?.common.visible;
+        }
+        self.set_visible(&ids, all_hidden)
+    }
+
+    /// Lock the selection — or unlock it, when all of it is locked already.
+    pub fn toggle_locked(&mut self) -> Result<bool> {
+        let ids = self.selection.ids().to_vec();
+        let mut all_locked = true;
+        for &id in &ids {
+            all_locked &= self.document.get(id)?.common.locked;
+        }
+        self.set_locked(&ids, !all_locked)
+    }
+
+    /// Move the selected layers to where they were dragged in the panel.
+    pub fn move_selection(&mut self, drop: Drop) -> Result<bool> {
+        self.end_interaction()?;
+        let command = layers::move_command(&self.document, self.selection.ids(), drop)?;
+        self.execute_some(command)
+    }
+
+    /// Bring forward or send backward, to the front or to the back.
+    pub fn arrange(&mut self, arrange: Arrange) -> Result<bool> {
+        self.end_interaction()?;
+        let command = layers::arrange_command(&self.document, self.selection.ids(), arrange)?;
+        self.execute_some(command)
+    }
+
+    /// Put the selection in a new group, which becomes the selection.
+    pub fn group_selection(&mut self) -> Result<bool> {
+        self.end_interaction()?;
+        if layers::roots(&self.document, self.selection.ids())?.is_empty() {
+            return Ok(false);
+        }
+        // The group enters the arena unattached, so the batch can refer to
+        // it; undo leaves it there, detached, as it does any removed node.
+        let group = self.document.insert_detached(Node::group("Group"));
+        let Some(command) = layers::group_command(&self.document, self.selection.ids(), group)?
+        else {
+            return Ok(false);
+        };
+        self.execute(command)?;
+        self.selection.set([group]);
+        Ok(true)
+    }
+
+    /// Dissolve the selected groups. What they held joins the selection in
+    /// their place.
+    pub fn ungroup_selection(&mut self) -> Result<bool> {
+        self.end_interaction()?;
+        let Some((command, freed)) = layers::ungroup_command(&self.document, self.selection.ids())?
+        else {
+            return Ok(false);
+        };
+        self.execute(command)?;
+        let mut ids: Vec<NodeId> = self
+            .selection
+            .ids()
+            .iter()
+            .copied()
+            .filter(|&id| self.document.is_attached(id))
+            .collect();
+        ids.extend(freed);
+        self.selection.set(ids);
+        self.hover = None;
+        Ok(true)
+    }
+
     // ---- Overlay -------------------------------------------------------------------
 
     /// Everything drawn over the artwork: in path editing and pen modes their
@@ -783,6 +907,7 @@ impl Session {
             outlines,
             hover,
             marquee: self.gesture.as_ref().and_then(Gesture::marquee_rect),
+            locked: self.selection_locked()?,
             gesture: self.gesture.as_ref().map(Gesture::label),
             pen: None,
             path: None,
@@ -790,6 +915,45 @@ impl Session {
     }
 
     // ---- Internals -----------------------------------------------------------------
+
+    /// End whatever is in progress before a panel or menu action: abandon a
+    /// drag or a property edit, finish the pen path, stop editing points.
+    fn end_interaction(&mut self) -> Result<()> {
+        self.cancel_gesture()?;
+        self.cancel_property()?;
+        self.finish_mode()?;
+        Ok(())
+    }
+
+    /// Apply commands as one undo step. Returns whether there were any.
+    fn execute_all(&mut self, commands: Vec<Command>) -> Result<bool> {
+        self.execute_some((!commands.is_empty()).then_some(Command::Batch(commands)))
+    }
+
+    fn execute_some(&mut self, command: Option<Command>) -> Result<bool> {
+        match command {
+            Some(command) => {
+                self.execute(command)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Whether anything selected is locked, itself or through a group.
+    fn selection_locked(&self) -> Result<bool> {
+        for &id in self.selection.ids() {
+            let mut cursor = Some(id);
+            while let Some(current) = cursor {
+                let node = self.document.get(current)?;
+                if node.common.locked {
+                    return Ok(true);
+                }
+                cursor = node.common.parent;
+            }
+        }
+        Ok(false)
+    }
 
     /// After undo or redo: drop selected, hovered and edited nodes that the
     /// history change took out of the tree.

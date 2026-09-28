@@ -663,6 +663,98 @@ try {
   check(status().includes("1 selected"), "without deselecting");
   await checkScreen("after the colour picker");
 
+  section("Layers panel");
+  const layerRows = () => [...document.querySelectorAll('aside[aria-label="Layers"] li')];
+  const rowNames = (n = 3) => layerRows().slice(0, n).map((li) => li.textContent).join(",");
+  const rowOf = (name) => layerRows().find((li) => li.textContent === name);
+  const fire = (target, event) => act(async () => target.dispatchEvent(event));
+  const clickRow = (name, shiftKey = false) =>
+    fire(rowOf(name), new window.MouseEvent("click", { bubbles: true, shiftKey }));
+  const renameRow = async (li, name) => {
+    await fire(li, new window.MouseEvent("dblclick", { bubbles: true }));
+    li.querySelector("input").value = name;
+    await key("Enter");
+  };
+  for (const [i, name] of ["Alpha", "Beta", "Gamma"].entries()) await renameRow(layerRows()[i], name);
+  check(rowNames() === "Alpha,Beta,Gamma", `double-clicking a row renames it (${rowNames()})`);
+  await key("z", { ctrlKey: true });
+  check(!rowNames().endsWith("Gamma"), "one undo step");
+  await key("z", { ctrlKey: true, shiftKey: true });
+
+  // Alpha is the green rect the properties panel left at (150, 250).
+  await press(rowOf("Alpha").querySelector('button[aria-label="Hide Alpha"]'));
+  check(screenPixel(200, 280).join() !== "0,255,0", "the eye hides a layer");
+  check(
+    rowOf("Alpha").querySelector('button[aria-label="Show Alpha"]')?.getAttribute("aria-pressed") === "true",
+    "and stays on its row while it is off",
+  );
+  await press(rowOf("Alpha").querySelector('button[aria-label="Show Alpha"]'));
+  check(screenPixel(200, 280).join() === "0,255,0", "and shows it again");
+
+  await clickRow("Alpha");
+  const handleCount = () => surface().querySelectorAll('svg rect[rx="1.5"]').length;
+  check(handleCount() > 0, "a selected layer has handles");
+  await press(rowOf("Alpha").querySelector('button[aria-label="Lock Alpha"]'));
+  check(
+    handleCount() === 0 && surface().querySelector("svg polygon")?.getAttribute("stroke-dasharray") === "4 3",
+    "locked, its frame is dashed and has no handles",
+  );
+  await drag([200, 280], [260, 330]);
+  await clickRow("Alpha");
+  check(frameOf() === "150 250 100 60", `and a drag on the canvas cannot move it (${frameOf()})`);
+  await press(rowOf("Alpha").querySelector('button[aria-label="Unlock Alpha"]'));
+
+  // jsdom does no layout: stack the rows 28px apart from y = 100.
+  const placeRows = () =>
+    layerRows().forEach((li, i) => {
+      li.getBoundingClientRect = () => ({ top: 100 + i * 28, bottom: 128 + i * 28, height: 28, left: 0, right: 240, width: 240 });
+    });
+  const rowY = (i, f) => 100 + i * 28 + 28 * f;
+  const list = () => document.querySelector('aside[aria-label="Layers"] ul');
+  const pointerOn = (target, type, y) =>
+    fire(target, new window.PointerEvent(type, { bubbles: true, clientY: y, button: 0, pointerId: 4 }));
+  await clickRow("Beta");
+  placeRows();
+  await pointerOn(rowOf("Alpha"), "pointerdown", rowY(0, 0.5));
+  await pointerOn(list(), "pointermove", rowY(1, 0.5));
+  await pointerOn(list(), "pointermove", rowY(2, 0.8));
+  check(rowOf("Gamma").dataset.drop === "below", "dragging a row marks where it would land");
+  check(status().includes("1 selected") && rowOf("Alpha").dataset.selected !== undefined, "and drags it alone, selected");
+  await pointerOn(list(), "pointerup", rowY(2, 0.8));
+  check(rowNames() === "Beta,Gamma,Alpha", `dropping moves it there (${rowNames()})`);
+  check(!document.querySelector("li[data-drop]"), "and the mark goes");
+  await checkScreen("after reordering layers");
+  await key("z", { ctrlKey: true });
+  check(rowNames() === "Alpha,Beta,Gamma", "one undo step");
+
+  await pointerOn(rowOf("Beta"), "pointerdown", rowY(1, 0.5));
+  await pointerOn(list(), "pointermove", rowY(4, 0.5));
+  await key("Escape");
+  await pointerOn(list(), "pointerup", rowY(4, 0.5));
+  check(rowNames() === "Alpha,Beta,Gamma" && status().includes("1 selected"), "Escape mid-drag drops nothing");
+
+  await clickRow("Beta");
+  await clickRow("Gamma", true);
+  await key("g", { ctrlKey: true });
+  check(rowNames(4) === "Alpha,Group,Beta,Gamma", `Ctrl+G groups the selection (${rowNames(4)})`);
+  check(rowOf("Beta").style.paddingLeft === "20px", "which is indented under the group");
+  await checkScreen("after grouping");
+  await key("g", { ctrlKey: true, shiftKey: true });
+  check(rowNames() === "Alpha,Beta,Gamma" && rowOf("Beta").style.paddingLeft === "8px", "Ctrl+Shift+G ungroups it");
+
+  await key("]", { ctrlKey: true, code: "BracketRight" });
+  check(rowNames() === "Beta,Gamma,Alpha", `Ctrl+] brings the selection forward (${rowNames()})`);
+  await key("[", { ctrlKey: true, code: "BracketLeft" });
+  check(rowNames() === "Alpha,Beta,Gamma", "Ctrl+[ sends it back");
+
+  await fire(rowOf("Alpha"), new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  const hideItem = [...document.querySelectorAll('[role="menuitem"]')].find((i) => i.textContent.startsWith("Hide"));
+  check(!!hideItem && rowOf("Alpha").dataset.selected !== undefined, "right-clicking a row selects it and opens its menu");
+  await press(hideItem);
+  check(!!rowOf("Alpha").querySelector('button[aria-label="Show Alpha"]'), "whose items act on it");
+  await key("z", { ctrlKey: true });
+  await checkScreen("after the layer panel");
+
   section("Files");
   await press([...document.querySelectorAll("header button")].find((b) => b.textContent.includes("Export SVG")));
   const svg = downloads.at(-1);

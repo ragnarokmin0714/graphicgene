@@ -1,12 +1,12 @@
 import { X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SWATCHES } from "@/color";
 import type { EditorMode } from "@/editor";
 import { download } from "@/files";
 import { Header } from "@/Header";
-import { LayerPanel } from "@/LayerPanel";
+import { type LayerActions, LayerPanel } from "@/LayerPanel";
 import { type PropertyActions, PropertiesPanel } from "@/PropertiesPanel";
 import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
@@ -96,8 +96,20 @@ export function App() {
   const properties = core?.properties() ?? null;
   const nextFill = () => SWATCHES[layerCount % SWATCHES.length];
 
-  const selectLayer = useCallback(
-    (id: string, additive: boolean) => run((editor) => editor.selectLayer(id, additive)),
+  const layerActions: LayerActions = useMemo(
+    () => ({
+      select: (id, additive) => run((editor) => editor.selectLayer(id, additive)),
+      rename: (id, name) => run((editor) => editor.rename(id, name)),
+      setVisible: (id, visible) => run((editor) => editor.setVisible(id, visible)),
+      setLocked: (id, locked) => run((editor) => editor.setLocked(id, locked)),
+      move: (target, place) => run((editor) => editor.moveSelection(target, place)),
+      arrange: (how) => run((editor) => editor.arrange(how)),
+      group: () => run((editor) => editor.group()),
+      ungroup: () => run((editor) => editor.ungroup()),
+      toggleVisible: () => run((editor) => editor.toggleVisible()),
+      toggleLocked: () => run((editor) => editor.toggleLocked()),
+      remove: () => run((editor) => editor.deleteSelection()),
+    }),
     [run],
   );
 
@@ -253,6 +265,15 @@ export function App() {
     { key: "delete", run: () => run((editor) => editor.deleteSelection()) },
     { key: "backspace", run: () => run((editor) => editor.deleteSelection()) },
     { key: "a", mod: true, run: () => run((editor) => editor.selectAll()) },
+    { key: "g", mod: true, run: layerActions.group },
+    { key: "g", mod: true, shift: true, run: layerActions.ungroup },
+    // By position, not character: Shift turns "]" into "}" on most layouts.
+    { code: "BracketRight", mod: true, run: () => layerActions.arrange("forward") },
+    { code: "BracketLeft", mod: true, run: () => layerActions.arrange("backward") },
+    { code: "BracketRight", mod: true, shift: true, run: () => layerActions.arrange("front") },
+    { code: "BracketLeft", mod: true, shift: true, run: () => layerActions.arrange("back") },
+    { key: "h", mod: true, shift: true, run: layerActions.toggleVisible },
+    { key: "l", mod: true, shift: true, run: layerActions.toggleLocked },
     { key: "z", mod: true, run: undo },
     { key: "z", mod: true, shift: true, run: redo },
     { key: "y", mod: true, run: redo },
@@ -303,7 +324,7 @@ export function App() {
         )}
 
         <main className="flex min-h-0 flex-1">
-          <LayerPanel layers={layers} onSelect={selectLayer} />
+          <LayerPanel layers={layers} actions={layerActions} />
           {/* The backdrop colour shows only until the core's first frame. */}
           <section className="bg-canvas-backdrop relative min-w-0 flex-1">
             <Stage

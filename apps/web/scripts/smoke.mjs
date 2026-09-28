@@ -271,4 +271,40 @@ assert.throws(() => inspected.setProperty('{"x": 1, "y": 2}'), /one key/);
 inspected.clearSelection();
 assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to");
 
+// Layers: rename, hide, lock, reorder, group — each one undo step.
+{
+  const layered = new Editor(W, H);
+  const [p, q, r] = [0, 20, 40].map((x) => layered.addRect(x, 0, 10, 10, RED));
+  const names = () => JSON.parse(layered.layerTree()).map((row) => `${"  ".repeat(row.depth)}${row.name}`);
+  layered.rename(p, "p");
+  layered.rename(q, "q");
+  layered.rename(r, "r");
+  assert.equal(layered.rename(r, "  r "), false, "the name it has, once trimmed");
+  assert.deepEqual(names(), ["r", "q", "p"], "topmost first");
+
+  layered.selectLayer(p, false);
+  assert.equal(layered.moveSelection(r, "above"), true);
+  assert.deepEqual(names(), ["p", "r", "q"]);
+  assert.equal(layered.arrange("backward"), true);
+  assert.deepEqual(names(), ["r", "p", "q"]);
+  assert.throws(() => layered.moveSelection(r, "beside"), /above, below or inside/);
+  assert.throws(() => layered.arrange("up"), /forward, backward, front or back/);
+
+  layered.selectLayer(q, true);
+  assert.equal(layered.group(), true);
+  assert.deepEqual(names(), ["r", "Group", "  p", "  q"], "the group takes p's place");
+  assert.equal(layered.ungroup(), true);
+  assert.deepEqual(names(), ["r", "p", "q"]);
+  layered.undo();
+  assert.deepEqual(names(), ["r", "Group", "  p", "  q"], "ungrouping was one step");
+
+  assert.equal(layered.setVisible(r, false), true);
+  assert.equal(JSON.parse(layered.layerTree())[0].visible, false);
+  assert.deepEqual(pixel(draw(layered), 45, 5), WHITE, "a hidden layer is not drawn");
+  layered.selectLayer(q, false);
+  assert.equal(layered.setLocked(q, true), true);
+  assert.equal(JSON.parse(layered.overlay()).locked, true, "the overlay says the selection is locked");
+  assert.equal(layered.beginMove(25, 5), false, "and the canvas cannot move it");
+}
+
 console.log("smoke: ok");

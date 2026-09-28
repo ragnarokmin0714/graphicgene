@@ -25,21 +25,22 @@ and the artboard size became document state. v0.2 work started on 2026-09-28
 with zoom and pan: the canvas now covers the whole stage in device pixels, so
 it is sharp on HiDPI screens. The properties panel followed the same day:
 position, size, rotation, opacity, fill and stroke, typed, stepped or
-scrubbed, each change one undo step. What is next, and the known
-architectural debt, is in `ROADMAP.md`.
+scrubbed, each change one undo step. Then the layer panel's operations:
+rename, hide, lock, drag to reorder, group and ungroup. What is next, and
+the known architectural debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 103 tests, including a randomized check that
+- `cargo test --workspace` — 110 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 128
+- `pnpm ui` — the React app driven in jsdom against the real core: 152
   checks, including zoom and pan, the properties panel and its colour
-  picker, and that the canvas equals a full redraw of the same document at
-  the same view
+  picker, the layer panel's rename, toggles and drag to reorder, and that
+  the canvas equals a full redraw of the same document at the same view
 
 Anything on a per-frame path also gets `pnpm bench` before and after; see
 Performance rules.
@@ -51,8 +52,8 @@ missing favicon (since fixed). This box has no browser engine, so anything
 changed after that date is verified headlessly only until he looks again — in
 particular the theme switch, the redesigned chrome, all canvas interaction
 (tools, handles, marquee, pen, path editing, shortcuts, zoom and pan), the
-properties panel and colour picker, and autosave / restore / file open /
-downloads. The React side of all that is exercised by `pnpm ui` (jsdom, the
+properties panel and colour picker, the layer panel's operations, and
+autosave / restore / file open / downloads. The React side of all that is exercised by `pnpm ui` (jsdom, the
 real wasm core, fake-indexeddb), which is the closest this box and CI get to
 a browser — but it cannot judge layout, feel or looks.
 
@@ -294,6 +295,13 @@ DOM-rendering Rust framework such as Dioxus, not an immediate-mode toolkit.
   back to where it started. A typed value is a preview and a commit in one
   call. Starting anything else (a press, undo, a new selection) abandons an
   edit left open, as it does a drag.
+- Tree edits (`layers.rs`: move, arrange, group, ungroup) are one `Batch`
+  each, of detaches, attaches and transform rewrites: a node that changes
+  parent keeps its place on the page. A new group enters the arena
+  unattached so the batch can name it, the way undo leaves removed nodes.
+- Locked means the canvas cannot touch it — no hit, no drag, no nudge, no
+  point editing — but a locked node can still be selected from the panel,
+  edited there, and deleted. The rule is `Session::selection_locked`.
 - The pen and path editing work on an anchor view of the path
   (`anchors.rs`); the file still stores plain `BezPath`s. A pen path joins
   the journal only when finished, so undo while drawing removes the last
@@ -329,8 +337,8 @@ demands them, not in advance.
 
 The core modules in the order data flows: `doc` (arena + change log),
 `command` (journal), `session` (the rules), then what the session drives —
-`selection`, `hit`, `gesture`, `anchors`, `pen`, `path_edit`, `properties`
-— and the outputs: `layout`, `svg`, `project`.
+`selection`, `hit`, `gesture`, `anchors`, `pen`, `path_edit`, `properties`,
+`layers` — and the outputs: `layout`, `svg`, `project`.
 
 ```
 graphicgene/
