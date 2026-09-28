@@ -10,8 +10,8 @@ them.
 
 **Try it:** <https://ragnarokmin0714.github.io/graphicgene/>
 
-> **Status: v0.2 preview.** Draw rectangles, ellipses and
-> bezier paths; select, move, scale and rotate them; edit any path point by
+> **Status: v0.3 preview.** Draw rectangles, ellipses, bezier paths and
+> text — Chinese included; select, move, scale and rotate them; edit any path point by
 > point; set position, size, rotation, opacity, fill and stroke in a
 > properties panel; rename, hide, lock, reorder and group layers; copy,
 > paste and duplicate; zoom and pan, sharp on HiDPI screens; undo
@@ -24,7 +24,8 @@ them.
 
 | | |
 |---|---|
-| `V` `R` `O` `P` | Select, Rectangle, Ellipse, Pen |
+| `V` `R` `O` `P` `T` | Select, Rectangle, Ellipse, Pen, Text |
+| Text | Click to type; double-click text or press `Enter` to edit it; `Esc` or a click away to finish. Fonts load as the text needs them |
 | Drag with a shape tool | Draw it — `Shift` for equal sides, `Alt` from the centre |
 | Pen | Click for a corner, drag for a curve; click the first point to close, `Enter` to finish |
 | Double-click a path | Edit its points: drag points and handles, click a segment to add a point, double-click a point for corner/curve |

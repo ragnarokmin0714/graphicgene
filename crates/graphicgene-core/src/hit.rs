@@ -25,6 +25,12 @@ pub fn hit_test(doc: &Document, point: Point, tolerance: f64) -> Result<Option<N
     }
 }
 
+/// The topmost selectable node under `point` itself, however deep — the
+/// one a text tool types into, rather than the group a click selects.
+pub fn hit_test_deep(doc: &Document, point: Point, tolerance: f64) -> Result<Option<NodeId>> {
+    topmost(doc, doc.root(), Affine::IDENTITY, point, tolerance)
+}
+
 /// Top-level selectable nodes whose bounds overlap `rect`, in paint order.
 ///
 /// Overlap rather than containment, matching Figma: a marquee only has to
@@ -81,7 +87,25 @@ fn topmost(
     {
         return Ok(Some(id));
     }
+    if let NodeKind::Text(text) = &node.kind
+        && box_hit(text.bounds(), world, point, tolerance)
+    {
+        return Ok(Some(id));
+    }
     Ok(None)
+}
+
+/// Text is hit anywhere in its box, not only on the glyphs: the gaps
+/// between letters are part of what a click means.
+fn box_hit(bounds: Bounds, world: Affine, point: Point, tolerance: f64) -> bool {
+    let det = world.determinant();
+    if det.abs() < 1e-12 {
+        return false;
+    }
+    let local = world.inverse() * point;
+    let reach = tolerance / det.abs().sqrt();
+    let near = bounds.inflate(reach, reach);
+    near.x0 <= local.x && local.x <= near.x1 && near.y0 <= local.y && local.y <= near.y1
 }
 
 fn vector_hit(vector: &VectorNode, world: Affine, point: Point, tolerance: f64) -> bool {

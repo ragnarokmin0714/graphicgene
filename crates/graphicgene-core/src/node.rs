@@ -9,6 +9,7 @@ use slotmap::new_key_type;
 
 use crate::color::LinearRgba;
 use crate::geom::{Affine, BezPath, Bounds, Shape};
+use crate::text::TextNode;
 
 new_key_type! {
     /// Stable identity for a node, preserved across save/load.
@@ -81,13 +82,13 @@ pub struct GroupNode {
 
 /// The kinds of node a document can hold.
 ///
-/// Later: `Raster` (pixel buffers), `Component` (reference + overrides),
-/// `Text` (shaped runs). None of them exist yet — see the scope rule in
-/// CLAUDE.md.
+/// Later: `Raster` (pixel buffers), `Component` (reference + overrides).
+/// Neither exists yet — see the scope rule in CLAUDE.md.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NodeKind {
     Group(GroupNode),
     Vector(VectorNode),
+    Text(TextNode),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,24 +123,36 @@ impl Node {
         }
     }
 
+    pub fn text(name: impl Into<String>, text: TextNode) -> Self {
+        Self {
+            common: NodeCommon {
+                name: name.into(),
+                ..Default::default()
+            },
+            kind: NodeKind::Text(text),
+        }
+    }
+
     pub fn children(&self) -> Option<&[NodeId]> {
         match &self.kind {
             NodeKind::Group(g) => Some(&g.children),
-            NodeKind::Vector(_) => None,
+            NodeKind::Vector(_) | NodeKind::Text(_) => None,
         }
     }
 
     pub fn children_mut(&mut self) -> Option<&mut Vec<NodeId>> {
         match &mut self.kind {
             NodeKind::Group(g) => Some(&mut g.children),
-            NodeKind::Vector(_) => None,
+            NodeKind::Vector(_) | NodeKind::Text(_) => None,
         }
     }
 
-    /// Bounds in this node's own coordinate space, before `transform`.
+    /// Bounds in this node's own coordinate space, before `transform`. For
+    /// text, the text box.
     pub fn local_bounds(&self) -> Option<Bounds> {
         match &self.kind {
             NodeKind::Vector(v) => Some(v.path.bounding_box()),
+            NodeKind::Text(t) => Some(t.bounds()),
             NodeKind::Group(_) => None,
         }
     }

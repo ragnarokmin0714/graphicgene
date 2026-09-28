@@ -7,9 +7,20 @@ description = "Document model, commands, geometry and layout for graphicgene"
 
 # Core is deliberately dependency-light and performs no IO.
 # Nothing here may reference browser or OS APIs.
+[features]
+# A font made in code for tests (`testing.rs`), shared with the render crate.
+testing = []
+
 [dependencies]
 kurbo.workspace = true
 slotmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# Fonts for text: cmap, advances, kerning and outlines. Chosen over a full
+# shaper — rustybuzz is 232 KB of gzipped wasm, harfrust with skrifa 309 KB,
+# this 41 KB — at the cost of scripts that need shaping; see text.rs.
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
+
+[dev-dependencies]
+graphicgene-core = { path = ".", features = ["testing"] }

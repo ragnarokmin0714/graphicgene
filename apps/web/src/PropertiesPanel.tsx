@@ -1,10 +1,29 @@
-import { Blend, Minus, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import {
+  ALargeSmall,
+  Blend,
+  ChevronDown,
+  Minus,
+  Plus,
+  RotateCcw,
+  SlidersHorizontal,
+  TextAlignCenter,
+  TextAlignEnd,
+  TextAlignStart,
+  UnfoldVertical,
+} from "lucide-react";
 import { memo } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ColorPicker } from "@/ColorPicker";
 import { isRgba } from "@/color";
-import type { Mixed, Properties, PropertyChange, Rgba } from "@/editor";
-import { HexField, NumberField } from "@/fields";
+import type { Mixed, Properties, PropertyChange, Rgba, TextAlign } from "@/editor";
+import { FIELD, HexField, NumberField } from "@/fields";
+import { FAMILY_NAMES } from "@/fonts";
 
 export type PropertyActions = {
   /** Show a change without recording it: a scrub or a picker drag in progress. */
@@ -106,6 +125,30 @@ function Sections({ properties: p, onPreview, onCommit, onCancel, onSet }: Props
           />
         </div>
       </Section>
+
+      {p.text && (
+        <Section title="Text">
+          <FamilyMenu family={p.text.family} onSet={(fontFamily) => onSet({ fontFamily })} />
+          <div className="grid grid-cols-2 gap-1.5">
+            <NumberField
+              name="Font size"
+              label={<ALargeSmall />}
+              value={p.text.size}
+              min={1}
+              {...field((fontSize: number) => ({ fontSize }))}
+            />
+            <NumberField
+              name="Line height"
+              label={<UnfoldVertical />}
+              value={p.text.lineHeight}
+              min={0.5}
+              step={0.05}
+              {...field((lineHeight: number) => ({ lineHeight }))}
+            />
+          </div>
+          <AlignButtons align={p.text.align} onSet={(textAlign) => onSet({ textAlign })} />
+        </Section>
+      )}
 
       {p.fill !== undefined && (
         <PaintSection
@@ -247,6 +290,62 @@ function PaintSection({
       </div>
       {children}
     </Section>
+  );
+}
+
+/**
+ * The families on offer. Picking one the fonts for have not arrived yet is
+ * fine: the core reports the characters it cannot set, and they are
+ * fetched.
+ */
+function FamilyMenu({ family, onSet }: { family: string | Mixed; onSet: (family: string) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Font family"
+          className={`${FIELD} hover:bg-muted w-full justify-between px-2 outline-none`}
+        >
+          <span className={family === "mixed" ? "text-muted-foreground" : ""}>
+            {family === "mixed" ? "Mixed" : family || "No font"}
+          </span>
+          <ChevronDown className="text-muted-foreground size-3" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
+        {FAMILY_NAMES.map((name) => (
+          <DropdownMenuItem key={name} onSelect={() => onSet(name)} style={{ fontFamily: `"${name}"` }}>
+            {name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const ALIGNMENTS: { align: TextAlign; label: string; icon: React.ReactNode }[] = [
+  { align: "left", label: "Align left", icon: <TextAlignStart /> },
+  { align: "center", label: "Align centre", icon: <TextAlignCenter /> },
+  { align: "right", label: "Align right", icon: <TextAlignEnd /> },
+];
+
+function AlignButtons({ align, onSet }: { align: TextAlign | Mixed; onSet: (align: TextAlign) => void }) {
+  return (
+    <div role="group" aria-label="Text alignment" className="bg-muted/70 flex w-fit gap-0.5 rounded-md p-0.5">
+      {ALIGNMENTS.map((option) => (
+        <Button
+          key={option.align}
+          size="icon-xs"
+          aria-label={option.label}
+          aria-pressed={align === option.align}
+          className="aria-pressed:bg-background aria-pressed:shadow-xs size-5"
+          onClick={() => onSet(option.align)}
+        >
+          {option.icon}
+        </Button>
+      ))}
+    </div>
   );
 }
 

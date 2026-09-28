@@ -272,7 +272,10 @@ fn position_is_in_document_space_whatever_the_parent() {
         Property::Rotation(p.rotation),
         Property::Rotation(p.rotation + 360.0),
     ] {
-        assert!(!session.set_property(property).unwrap(), "{property:?}");
+        assert!(
+            !session.set_property(property.clone()).unwrap(),
+            "{property:?}"
+        );
     }
 
     // A group has no paint of its own.

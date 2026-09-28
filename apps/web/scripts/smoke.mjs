@@ -383,7 +383,79 @@ assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to")
   assert.equal(routed.tool, "select", "Escape puts the tool down");
   routed.escape();
   assert.equal(routed.selectionCount(), 0, "then the selection");
-  assert.throws(() => routed.setTool("brush"), /select, rect, ellipse or pen/);
+  assert.throws(() => routed.setTool("brush"), /select, rect, ellipse, pen or text/);
+}
+
+// Text in a real font — Noto Sans TC, sliced as the page loads it — typed
+// through the text tool, with a missing character reported until its slice
+// arrives.
+{
+  const { inflateSync } = await import("node:zlib");
+  /** WOFF 1.0 to sfnt, as fonts.ts does it with the browser's inflater. */
+  const woffToSfnt = (woff) => {
+    const view = new DataView(woff.buffer, woff.byteOffset, woff.byteLength);
+    const tables = view.getUint16(12);
+    const out = new Uint8Array(view.getUint32(16));
+    const sfnt = new DataView(out.buffer);
+    sfnt.setUint32(0, view.getUint32(4));
+    sfnt.setUint16(4, tables);
+    let offset = 12 + tables * 16;
+    for (let i = 0; i < tables; i++) {
+      const entry = 44 + i * 20;
+      const [at, compressed, length] = [view.getUint32(entry + 4), view.getUint32(entry + 8), view.getUint32(entry + 12)];
+      sfnt.setUint32(12 + i * 16, view.getUint32(entry));
+      sfnt.setUint32(12 + i * 16 + 8, offset);
+      sfnt.setUint32(12 + i * 16 + 12, length);
+      const data = woff.subarray(at, at + compressed);
+      out.set(compressed < length ? inflateSync(data) : data, offset);
+      offset += (length + 3) & ~3;
+    }
+    return out;
+  };
+  const noto = fileURLToPath(new URL(".", import.meta.resolve("@fontsource/noto-sans-tc/unicode.json")));
+  const slice = async (key) => woffToSfnt(await readFile(`${noto}files/noto-sans-tc-${key}-400-normal.woff`));
+  const ranges = JSON.parse(await readFile(`${noto}unicode.json`, "utf8"));
+  const sliceFor = (char) => {
+    const code = char.codePointAt(0);
+    return Object.keys(ranges).find((key) =>
+      ranges[key].split(",").some((part) => {
+        const [from, to = from] = part.trim().slice(2).split("-").map((h) => parseInt(h, 16));
+        return from <= code && code <= to;
+      }),
+    ).replace(/[[\]]/g, "");
+  };
+
+  const typed = new Editor(W, H);
+  assert.equal(typed.addFont(await slice("latin")), "Noto Sans TC");
+  typed.setTool("text");
+  typed.pointerDown(4, 8, false, false, "", 0, 0, 4, 6, RED);
+  typed.pointerUp();
+  const field = JSON.parse(typed.overlay());
+  assert.equal(field.mode, "text");
+  assert.deepEqual([field.text.family, field.text.size, field.text.matrix], ["Noto Sans TC", 24, [1, 0, 0, 1, 4, 8]]);
+
+  typed.previewText("Hi 中");
+  typed.render();
+  assert.deepEqual(JSON.parse(typed.missingGlyphs()), { "Noto Sans TC": "中" }, "the Latin slice has no 中");
+  const version = typed.glyphsVersion;
+  typed.addFont(await slice(sliceFor("中")));
+  const ink = () => {
+    const data = draw(typed);
+    let red = 0;
+    for (let y = 8; y < 40; y++) for (let x = 4; x < 64; x++) if (pixel(data, x, y)[1] < 128) red++;
+    return red;
+  };
+  const withHan = ink();
+  assert.ok(typed.glyphsVersion > version, "laid out again with the new slice");
+  assert.deepEqual(JSON.parse(typed.missingGlyphs()), {}, "nothing missing now");
+  assert.ok(withHan > 40, `the glyphs are drawn (${withHan} red pixels)`);
+
+  assert.equal(typed.commitText(), true);
+  const [row] = JSON.parse(typed.layerTree());
+  assert.deepEqual([row.kind, row.name], ["text", "Hi 中"], "a text layer named after it");
+  assert.match(typed.exportSvg(), /aria-label="Hi 中"/, "exported as outlines, labelled");
+  typed.undo();
+  assert.equal(JSON.parse(typed.layerTree()).length, 0, "typing it was one step");
 }
 
 console.log("smoke: ok");

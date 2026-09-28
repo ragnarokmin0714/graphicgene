@@ -23,7 +23,7 @@ export type LayerRow = {
   /** 0 for top-level layers. Rows arrive in panel order: topmost first. */
   depth: number;
   name: string;
-  kind: "group" | "vector";
+  kind: "group" | "vector" | "text";
   visible: boolean;
   locked: boolean;
   opacity: number;
@@ -56,6 +56,13 @@ export type Properties = {
   stroke?: Rgba | null | Mixed;
   /** Of the strokes there are; left out when nothing is stroked. */
   strokeWidth?: number | Mixed;
+  /** What the selected text shares; left out when no text is selected. */
+  text?: {
+    family: string | Mixed;
+    size: number | Mixed;
+    lineHeight: number | Mixed;
+    align: TextAlign | Mixed;
+  };
 };
 
 /** One change made through the properties panel. */
@@ -72,7 +79,12 @@ export type PropertyChange =
   /** Recolours strokes, adding a thin one where there is none. */
   | { strokeColor: Rgba }
   /** Re-widths the strokes there are. */
-  | { strokeWidth: number };
+  | { strokeWidth: number }
+  | { fontFamily: string }
+  | { fontSize: number }
+  /** A multiple of the font size. */
+  | { lineHeight: number }
+  | { textAlign: TextAlign };
 
 /** A point in screen pixels: CSS pixels from the viewport's top-left corner. */
 export type Point = readonly [number, number];
@@ -107,7 +119,27 @@ export type PathOverlay = {
   handles: HandleLine[];
 };
 
-export type EditorMode = "pen" | "path";
+export type EditorMode = "pen" | "path" | "text";
+
+export type TextAlign = "left" | "center" | "right";
+
+/** Text being typed: where the page's text field goes, and the type to set it in. */
+export type TextOverlay = {
+  /** The node being typed into; a new one means a new edit. */
+  id: string;
+  /** The text box's space to the screen, as a CSS matrix. */
+  matrix: readonly [number, number, number, number, number, number];
+  content: string;
+  family: string;
+  /** In the text box's own units, which the matrix scales. */
+  size: number;
+  /** A multiple of the size. */
+  lineHeight: number;
+  align: TextAlign;
+  /** The text box, in its own units. */
+  width: number;
+  height: number;
+};
 
 /** What the overlay draws, in screen pixels. */
 export type Overlay = {
@@ -124,12 +156,13 @@ export type Overlay = {
   gesture: "move" | "scale" | "rotate" | "create" | "marquee" | null;
   pen?: PenOverlay;
   path?: PathOverlay;
+  text?: TextOverlay;
   /** Where the artboard is on screen (x0, y0, x1, y1), and its size in document units. */
   artboard: { rect: readonly [number, number, number, number]; width: number; height: number };
 };
 
 /** What the pointer does on the canvas. Session state, kept in the core. */
-export type Tool = "select" | "rect" | "ellipse" | "pen";
+export type Tool = "select" | "rect" | "ellipse" | "pen" | "text";
 
 /** Modifier keys held during a press or a move. */
 export type Keys = { shift: boolean; alt: boolean };
@@ -480,6 +513,38 @@ export class EditorHandle {
 
   ungroup(): boolean {
     return this.inner.ungroup();
+  }
+
+  // Text. The page fetches fonts and hands them over; the core says which
+  // characters it could not set. Typing happens in the page's text field.
+
+  /** TrueType or OpenType bytes, not WOFF. Returns the family name. */
+  addFont(sfnt: Uint8Array): string {
+    return this.inner.addFont(sfnt);
+  }
+
+  get fontFamilies(): string[] {
+    return JSON.parse(this.inner.fontFamilies()) as string[];
+  }
+
+  /** Moves when text is laid out again; ask `missingGlyphs` then. */
+  get glyphsVersion(): number {
+    return this.inner.glyphsVersion;
+  }
+
+  /** Characters no font at hand has: family → the characters. */
+  missingGlyphs(): Record<string, string> {
+    return JSON.parse(this.inner.missingGlyphs()) as Record<string, string>;
+  }
+
+  /** What the text field holds now; drawn, not recorded. */
+  previewText(content: string): boolean {
+    return this.inner.previewText(content);
+  }
+
+  /** Record the typing as one undo step. */
+  commitText(): boolean {
+    return this.inner.commitText();
   }
 
   // Clipboard: the core hands over text and takes it back; the page moves

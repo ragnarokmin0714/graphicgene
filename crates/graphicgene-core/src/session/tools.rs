@@ -12,7 +12,8 @@ use crate::color::LinearRgba;
 use crate::error::Result;
 use crate::geom::Point;
 use crate::gesture::{Modifiers, ShapeKind, TransformKind};
-use crate::node::Stroke;
+use crate::hit;
+use crate::node::{NodeId, NodeKind, Stroke};
 
 use super::{Mode, SelectOutcome, Session};
 
@@ -27,6 +28,7 @@ pub enum Tool {
     Rect,
     Ellipse,
     Pen,
+    Text,
 }
 
 /// The selection handle under a press, as the shell's hit-test found it.
@@ -57,6 +59,8 @@ pub(super) enum Route {
     Pen,
     Path,
     Gesture,
+    /// A press that started typing: nothing to drag.
+    Text,
 }
 
 impl Session {
@@ -84,7 +88,23 @@ impl Session {
         let Pointer {
             point, modifiers, ..
         } = at;
-        let route = if self.tool == Tool::Pen {
+        // A press away from text being typed finishes it and puts the text
+        // tool down: from here on it is a select press.
+        if self.editing_text() {
+            self.commit_text()?;
+            self.tool = Tool::Select;
+        }
+        let route = if self.tool == Tool::Text {
+            match hit::hit_test_deep(&self.document, point, at.hit_tolerance)? {
+                Some(id) if self.is_text(id)? => {
+                    self.edit_text(id)?;
+                }
+                _ => {
+                    self.begin_text(point, color)?;
+                }
+            }
+            Route::Text
+        } else if self.tool == Tool::Pen {
             let stroke = Stroke {
                 color,
                 width: PEN_STROKE_WIDTH,
@@ -135,6 +155,7 @@ impl Session {
             Some(Route::Pen) => self.pen_drag(point, modifiers.shift)?,
             Some(Route::Path) => self.path_drag(point, modifiers)?,
             Some(Route::Gesture) => self.update_gesture(point, modifiers)?,
+            Some(Route::Text) => return Ok(false),
             None if self.tool == Tool::Pen => return Ok(self.pen_hover(point, at.pick_tolerance)),
             None if self.tool == Tool::Select && self.mode().is_none() => {
                 return self.hover(point, at.hit_tolerance);
@@ -154,7 +175,7 @@ impl Session {
                 false
             }
             Some(Route::Gesture) => self.end_gesture()?.is_some(),
-            None => false,
+            Some(Route::Text) | None => false,
         };
         if finished {
             self.tool = Tool::Select;
@@ -170,21 +191,22 @@ impl Session {
             Some(Route::Gesture) => {
                 self.cancel_gesture()?;
             }
-            Some(Route::Pen) | None => {}
+            Some(Route::Pen | Route::Text) | None => {}
         }
         Ok(())
     }
 
-    /// A double-click with the select tool edits a path's points; while
-    /// editing, it toggles a point between corner and curve, or stops on
-    /// empty space. The one that finishes a pen path is not one of these.
+    /// A double-click with the select tool types into selected text, or
+    /// edits a path's points; while editing points, it toggles one between
+    /// corner and curve, or stops on empty space. The one that finishes a
+    /// pen path is not one of these.
     pub fn double_click(&mut self, at: Pointer) -> Result<()> {
         if self.tool != Tool::Select || self.last_route == Some(Route::Pen) {
             return Ok(());
         }
         if self.mode() == Some(Mode::PathEdit) {
             self.path_double_click(at.point, at.pick_tolerance)?;
-        } else {
+        } else if !self.edit_selected_text()? {
             self.begin_path_edit()?;
         }
         Ok(())
@@ -198,7 +220,7 @@ impl Session {
             return Ok(());
         }
         if self.finish_mode()? {
-            if self.tool == Tool::Pen {
+            if matches!(self.tool, Tool::Pen | Tool::Text) {
                 self.tool = Tool::Select;
             }
             return Ok(());
@@ -211,15 +233,28 @@ impl Session {
     }
 
     /// Enter finishes the pen path or point editing — or, with the select
-    /// tool, starts editing the selected path's points.
+    /// tool, starts typing into the selected text or editing the selected
+    /// path's points.
     pub fn enter(&mut self) -> Result<()> {
         if self.finish_mode()? {
-            if self.tool == Tool::Pen {
+            if matches!(self.tool, Tool::Pen | Tool::Text) {
                 self.tool = Tool::Select;
             }
-        } else if self.tool == Tool::Select {
+        } else if self.tool == Tool::Select && !self.edit_selected_text()? {
             self.begin_path_edit()?;
         }
         Ok(())
+    }
+
+    /// Type into the one selected node, if it is text.
+    fn edit_selected_text(&mut self) -> Result<bool> {
+        match *self.selection.ids() {
+            [id] if self.is_text(id)? => self.edit_text(id),
+            _ => Ok(false),
+        }
+    }
+
+    fn is_text(&self, id: NodeId) -> Result<bool> {
+        Ok(matches!(self.document.get(id)?.kind, NodeKind::Text(_)))
     }
 }

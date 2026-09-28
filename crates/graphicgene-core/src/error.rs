@@ -14,6 +14,12 @@ pub enum CoreError {
     #[error("node {0:?} is not a vector path")]
     NotAVector(crate::node::NodeId),
 
+    #[error("node {0:?} is not text")]
+    NotText(crate::node::NodeId),
+
+    #[error("that is not a font this build can read (TrueType or OpenType)")]
+    BadFont,
+
     #[error("child index {index} is out of range (parent holds {len})")]
     BadChildIndex { index: usize, len: usize },
 

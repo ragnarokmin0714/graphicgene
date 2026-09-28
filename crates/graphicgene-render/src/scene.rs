@@ -18,7 +18,7 @@ use graphicgene_core::error::Result;
 use graphicgene_core::geom::{
     Affine, BezPath, Bounds, Rect, Shape, empty_bounds, is_empty_bounds, union,
 };
-use graphicgene_core::node::{BlendMode, NodeId, NodeKind, Stroke, VectorNode};
+use graphicgene_core::node::{BlendMode, Node, NodeId, NodeKind, Stroke};
 
 /// Antialiasing touches up to a pixel beyond a shape's edge — a *device*
 /// pixel, whatever the zoom, which is why it is added after the view
@@ -150,10 +150,9 @@ impl RenderScene {
         let transform = parent_transform * node.common.transform;
         let opacity = parent_opacity * node.common.opacity;
 
-        if let NodeKind::Vector(vector) = &node.kind {
+        if let Some(item) = item(id, node, transform, opacity) {
             self.index.insert(id, self.items.len());
-            self.items
-                .push(item(id, vector, transform, opacity, node.common.blend_mode));
+            self.items.push(item);
         }
         for &child in doc.children_of(id)? {
             self.visit(doc, child, transform, opacity)?;
@@ -179,16 +178,18 @@ impl RenderScene {
         let transform = parent_transform * node.common.transform;
         let opacity = parent_opacity * node.common.opacity;
 
-        if let NodeKind::Vector(vector) = &node.kind {
-            match (visible, self.index.get(&id)) {
-                (true, Some(&i)) => {
-                    let fresh = item(id, vector, transform, opacity, node.common.blend_mode);
-                    *region = union(union(*region, self.items[i].bounds), fresh.bounds);
-                    self.items[i] = fresh;
-                }
-                (false, None) => {}
-                _ => return Ok(false),
+        let fresh = if visible {
+            item(id, node, transform, opacity)
+        } else {
+            None
+        };
+        match (fresh, self.index.get(&id)) {
+            (Some(fresh), Some(&i)) => {
+                *region = union(union(*region, self.items[i].bounds), fresh.bounds);
+                self.items[i] = fresh;
             }
+            (None, None) => {}
+            _ => return Ok(false),
         }
         for &child in doc.children_of(id)? {
             if !self.refresh(doc, child, transform, opacity, visible, region)? {
@@ -218,24 +219,25 @@ fn ancestry(doc: &Document, id: NodeId) -> Result<(Affine, f32, bool)> {
     Ok((transform, opacity, visible))
 }
 
-fn item(
-    node: NodeId,
-    vector: &VectorNode,
-    transform: Affine,
-    opacity: f32,
-    blend_mode: BlendMode,
-) -> RenderItem {
-    let reach = vector.stroke.map_or(0.0, |s| s.width * STROKE_REACH);
-    let local = vector.path.bounding_box().inflate(reach, reach);
+/// What `node` draws itself, if anything: a vector's path, or text's glyph
+/// outlines once the layout pass has set them.
+fn item(id: NodeId, node: &Node, transform: Affine, opacity: f32) -> Option<RenderItem> {
+    let (path, fill, stroke) = match &node.kind {
+        NodeKind::Vector(vector) => (&vector.path, vector.fill, vector.stroke),
+        NodeKind::Text(text) => (&text.layout.as_ref()?.path, text.fill, None),
+        NodeKind::Group(_) => return None,
+    };
+    let reach = stroke.map_or(0.0, |s: Stroke| s.width * STROKE_REACH);
+    let local = path.bounding_box().inflate(reach, reach);
     let bounds = transform.transform_rect_bbox(local);
-    RenderItem {
-        node,
+    Some(RenderItem {
+        node: id,
         transform,
-        path: vector.path.clone(),
-        fill: vector.fill,
-        stroke: vector.stroke,
+        path: path.clone(),
+        fill,
+        stroke,
         opacity,
-        blend_mode,
+        blend_mode: node.common.blend_mode,
         bounds,
-    }
+    })
 }

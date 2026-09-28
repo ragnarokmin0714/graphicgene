@@ -69,6 +69,31 @@ fn write_node(doc: &Document, id: NodeId, depth: usize, out: &mut String) -> Res
             }
             let _ = writeln!(out, "{indent}</g>");
         }
+        // Text goes out as its outlines: the SVG then looks the same on a
+        // machine without the font.
+        NodeKind::Text(text) => {
+            let Some(layout) = &text.layout else {
+                return Ok(());
+            };
+            let d = layout.path.to_svg();
+            if d.is_empty() {
+                return Ok(());
+            }
+            let fill = match text.fill {
+                Some(fill) => {
+                    let (hex, alpha) = srgb(fill);
+                    let opacity =
+                        alpha.map_or(String::new(), |a| format!(r#" fill-opacity="{a}""#));
+                    format!(r#" fill="{hex}"{opacity}"#)
+                }
+                None => r#" fill="none""#.to_owned(),
+            };
+            let label = escape(&text.content);
+            let _ = writeln!(
+                out,
+                r#"{indent}<path{attrs} aria-label="{label}" d="{d}"{fill}/>"#
+            );
+        }
         NodeKind::Vector(vector) => {
             let d = vector.path.to_svg();
             if d.is_empty() {

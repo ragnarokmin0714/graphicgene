@@ -26,13 +26,20 @@ The things anyone misses in their first five minutes.
 | ~~PNG export~~ | **Done 2026-09-28.** `graphicgene_render::export` draws the artboard at 1×, 2× or 3×, with or without the page, as straight-alpha pixels; the browser encodes them (`canvas.toBlob`). A PNG encoder in the wasm cost 53 KB gzipped and nine crates, so tiny-skia is built without it; a native shell can encode with the `png` crate. |
 | ~~Tool routing in core~~ | **Done 2026-09-28.** The session holds the tool and takes pointer down / move / up, double-clicks, Escape and Enter, routing each for the tool in hand (`session/tools.rs`). The page keeps panning, the cursor and the screen-space handle hit-test, whose result travels with the press. |
 
-## v0.3 — text
+## v0.3 — text · done, `v0.3.0`
 
-Shaping with `cosmic-text` / `rustybuzz`, font loading (bytes from the app
-layer, since core does no IO), a `Text` node kind, and text converted to paths
-on export. Editing goes through a DOM input over the canvas, so Chinese and
-other IME input works — the main reason the UI is React and not a Rust
-toolkit.
+Built 2026-09-28. A `Text` node kind and a text tool (`T`): click to type,
+double-click or Enter to edit, Escape or a click away to finish — one undo
+step. Typing goes through a browser text field over the text box, so
+Chinese and every other input method work; the core sets the text and the
+canvas draws it as it is typed. Family, size, line height and alignment in
+the properties panel; text exports as outlines in SVG and PNG.
+
+The shaping plan changed on measurement: `cosmic-text`'s shaper
+(harfrust with skrifa) is 309 KB of gzipped wasm and rustybuzz 232 KB, so
+v0.3 shapes simply with `ttf-parser` — cmap, advances, pair kerning — at
+41 KB. Fonts are Noto Sans TC and Inter from Fontsource, fetched slice by
+slice as the text needs them; the core says what is missing.
 
 ## v0.4 — desktop
 
@@ -95,6 +102,17 @@ Known and deliberate, roughly in the order it will start to hurt.
     all colour is sRGB; a wide-gamut or HDR colour would be clipped to 8 bits
     the moment it is edited. The boundary would then carry floats, and the
     picker its own colour space.
+11. **Text is shaped simply.** No ligatures, and scripts that need real
+    shaping — Arabic, Indic, Thai — come out wrong. A full shaper
+    (rustybuzz, harfrust) replaces `shape_line`; it costs 200–300 KB of
+    gzipped wasm, so it may want loading only when such text appears.
+12. **Text boxes only grow.** Lines break at newlines, never to a width;
+    there is one weight, regular. Fixed-width boxes and bold need wrapping
+    in the layout pass and more font slices.
+13. **The text field's caret follows the browser's font metrics.** The
+    core uses the font's ascender and descender; a browser on some systems
+    uses the OS/2 metrics instead, which can put the caret a pixel or two
+    off the glyphs. The glyphs themselves are always the core's.
 
 ## Done in the 2026-09-27 architecture pass
 

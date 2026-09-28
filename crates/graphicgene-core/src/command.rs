@@ -18,6 +18,7 @@ use crate::doc::Document;
 use crate::error::{CoreError, Result};
 use crate::geom::{Affine, BezPath};
 use crate::node::{Node, NodeId, NodeKind, Stroke};
+use crate::text::TextStyle;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
@@ -66,6 +67,14 @@ pub enum Command {
     SetPath {
         id: NodeId,
         path: BezPath,
+    },
+    SetText {
+        id: NodeId,
+        content: String,
+    },
+    SetTextStyle {
+        id: NodeId,
+        style: TextStyle,
     },
     /// Several commands as one undo step — a drag that moves five nodes, or a
     /// delete of the whole selection. All or nothing: if one fails, the ones
@@ -152,17 +161,16 @@ impl Command {
 
             Command::SetFill { id, fill } => {
                 let node = doc.get_mut(*id)?;
-                match &mut node.kind {
-                    NodeKind::Vector(v) => {
-                        let previous = v.fill;
-                        v.fill = *fill;
-                        Ok(Command::SetFill {
-                            id: *id,
-                            fill: previous,
-                        })
-                    }
-                    NodeKind::Group(_) => Err(CoreError::MissingNode(*id)),
-                }
+                let slot = match &mut node.kind {
+                    NodeKind::Vector(v) => &mut v.fill,
+                    NodeKind::Text(t) => &mut t.fill,
+                    NodeKind::Group(_) => return Err(CoreError::NotAVector(*id)),
+                };
+                let previous = std::mem::replace(slot, *fill);
+                Ok(Command::SetFill {
+                    id: *id,
+                    fill: previous,
+                })
             }
 
             Command::SetStroke { id, stroke } => {
@@ -175,7 +183,7 @@ impl Command {
                             stroke: previous,
                         })
                     }
-                    NodeKind::Group(_) => Err(CoreError::NotAVector(*id)),
+                    NodeKind::Group(_) | NodeKind::Text(_) => Err(CoreError::NotAVector(*id)),
                 }
             }
 
@@ -189,8 +197,30 @@ impl Command {
                             path: previous,
                         })
                     }
-                    NodeKind::Group(_) => Err(CoreError::MissingNode(*id)),
+                    NodeKind::Group(_) | NodeKind::Text(_) => Err(CoreError::NotAVector(*id)),
                 }
+            }
+
+            Command::SetText { id, content } => {
+                let NodeKind::Text(text) = &mut doc.get_mut(*id)?.kind else {
+                    return Err(CoreError::NotText(*id));
+                };
+                let previous = std::mem::replace(&mut text.content, content.clone());
+                Ok(Command::SetText {
+                    id: *id,
+                    content: previous,
+                })
+            }
+
+            Command::SetTextStyle { id, style } => {
+                let NodeKind::Text(text) = &mut doc.get_mut(*id)?.kind else {
+                    return Err(CoreError::NotText(*id));
+                };
+                let previous = std::mem::replace(&mut text.style, style.clone());
+                Ok(Command::SetTextStyle {
+                    id: *id,
+                    style: previous,
+                })
             }
 
             Command::Batch(commands) => {
@@ -229,7 +259,9 @@ impl Command {
             | Command::Rename { id, .. }
             | Command::SetFill { id, .. }
             | Command::SetStroke { id, .. }
-            | Command::SetPath { id, .. } => Some(*id),
+            | Command::SetPath { id, .. }
+            | Command::SetText { id, .. }
+            | Command::SetTextStyle { id, .. } => Some(*id),
             Command::Batch(commands) => commands.first().and_then(Command::target),
         }
     }

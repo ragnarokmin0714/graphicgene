@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Folder, Layers, Lock, LockOpen, Spline } from "lucide-react";
+import { Eye, EyeOff, Folder, Layers, Lock, LockOpen, Spline, Type } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ContextMenu,
@@ -205,11 +205,7 @@ export const LayerPanel = memo(function LayerPanel({ layers, actions }: Props) {
                       }}
                     />
                   )}
-                  {layer.kind === "group" ? (
-                    <Folder className="text-muted-foreground group-data-selected:text-primary size-3.5 shrink-0" />
-                  ) : (
-                    <Spline className="text-muted-foreground group-data-selected:text-primary size-3.5 shrink-0" />
-                  )}
+                  <KindIcon kind={layer.kind} />
                   {renaming === layer.id ? (
                     <RenameInput
                       name={layer.name}
@@ -297,6 +293,11 @@ export const LayerPanel = memo(function LayerPanel({ layers, actions }: Props) {
     </aside>
   );
 });
+
+function KindIcon({ kind }: { kind: LayerRow["kind"] }) {
+  const Icon = kind === "group" ? Folder : kind === "text" ? Type : Spline;
+  return <Icon className="text-muted-foreground group-data-selected:text-primary size-3.5 shrink-0" />;
+}
 
 /**
  * The eye and the lock on a row. They appear on hover, and stay while they

@@ -109,6 +109,12 @@ impl Document {
         Ok(node)
     }
 
+    /// What changed since the last `take_changes`, without taking it: for
+    /// the layout pass, which runs just before.
+    pub fn pending_changes(&self) -> &Changes {
+        &self.changes
+    }
+
     /// Everything that changed since the last call, leaving the log empty.
     pub fn take_changes(&mut self) -> Changes {
         std::mem::take(&mut self.changes)

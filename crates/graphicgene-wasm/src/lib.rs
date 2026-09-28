@@ -30,8 +30,9 @@ use graphicgene_core::node::{Node, NodeId, Stroke};
 use graphicgene_core::path_edit::PressOutcome;
 use graphicgene_core::properties::{Properties, Property, Shared};
 use graphicgene_core::session::{
-    Grab, Mode, Overlay, PEN_STROKE_WIDTH, Pointer, SelectOutcome, Session, Tool,
+    Grab, LayerKind, Mode, Overlay, PEN_STROKE_WIDTH, Pointer, SelectOutcome, Session, Tool,
 };
+use graphicgene_core::text::TextAlign;
 use graphicgene_core::view::{MAX_ZOOM, View};
 use graphicgene_render::{
     CpuRenderer, Damage, PixelRect, RenderScene, Renderer, device_area, scroll,
@@ -431,7 +432,11 @@ impl Editor {
                     "visible": row.visible,
                     "locked": row.locked,
                     "opacity": row.opacity,
-                    "kind": if row.is_group { "group" } else { "vector" },
+                    "kind": match row.kind {
+                        LayerKind::Group => "group",
+                        LayerKind::Vector => "vector",
+                        LayerKind::Text => "text",
+                    },
                 })
             })
             .collect();
@@ -506,6 +511,60 @@ impl Editor {
         self.session.ungroup_selection().map_err(to_js)
     }
 
+    // ---- Text ------------------------------------------------------------------------
+    //
+    // Fonts come from the page, which fetches them; the core says which
+    // characters it could not set. Typing happens in the page's text field,
+    // sent here on every change, and is one undo step when committed.
+
+    /// Take a font's bytes — TrueType or OpenType, not WOFF. Returns its
+    /// family name.
+    #[wasm_bindgen(js_name = addFont)]
+    pub fn add_font(&mut self, bytes: &[u8]) -> Result<String, JsError> {
+        self.session.add_font(bytes.to_vec()).map_err(to_js)
+    }
+
+    /// The families at hand, as a JSON array, first loaded first.
+    #[wasm_bindgen(js_name = fontFamilies)]
+    pub fn font_families(&self) -> Result<String, JsError> {
+        to_json(&json!(self.session.font_families()))
+    }
+
+    /// Moves when text is laid out again: ask `missingGlyphs` then.
+    #[wasm_bindgen(getter, js_name = glyphsVersion)]
+    pub fn glyphs_version(&self) -> f64 {
+        self.session.glyphs_version() as f64
+    }
+
+    /// Characters no font at hand has, as JSON: family → the characters.
+    #[wasm_bindgen(js_name = missingGlyphs)]
+    pub fn missing_glyphs(&mut self) -> Result<String, JsError> {
+        self.session.layout().map_err(to_js)?;
+        let missing = self.session.missing_glyphs().map_err(to_js)?;
+        let map: serde_json::Map<String, Value> = missing
+            .into_iter()
+            .map(|(family, chars)| (family, Value::String(chars.into_iter().collect())))
+            .collect();
+        to_json(&Value::Object(map))
+    }
+
+    /// What the text field holds now; drawn, not recorded.
+    #[wasm_bindgen(js_name = previewText)]
+    pub fn preview_text(&mut self, content: &str) -> Result<bool, JsError> {
+        self.session.preview_text(content).map_err(to_js)
+    }
+
+    /// Record the typing as one undo step.
+    #[wasm_bindgen(js_name = commitText)]
+    pub fn commit_text(&mut self) -> Result<bool, JsError> {
+        Ok(self.session.commit_text().map_err(to_js)?.is_some())
+    }
+
+    #[wasm_bindgen(js_name = cancelText)]
+    pub fn cancel_text(&mut self) -> Result<bool, JsError> {
+        self.session.cancel_text().map_err(to_js)
+    }
+
     // ---- Clipboard -------------------------------------------------------------------
     //
     // Text in and out: the page moves it through the system clipboard.
@@ -542,7 +601,8 @@ impl Editor {
     /// value the selected nodes do not share is `"mixed"`. A colour is
     /// `[r, g, b, a]`, or `null` for none; `fill` and `stroke` are left out
     /// when only groups are selected, `strokeWidth` when nothing is stroked.
-    pub fn properties(&self) -> Result<String, JsError> {
+    pub fn properties(&mut self) -> Result<String, JsError> {
+        self.session.layout().map_err(to_js)?;
         let value = match self.session.properties().map_err(to_js)? {
             Some(properties) => properties_json(&properties),
             None => Value::Null,
@@ -669,6 +729,7 @@ impl Editor {
             Tool::Rect => "rect",
             Tool::Ellipse => "ellipse",
             Tool::Pen => "pen",
+            Tool::Text => "text",
         }
         .to_owned()
     }
@@ -681,7 +742,8 @@ impl Editor {
             "rect" => Tool::Rect,
             "ellipse" => Tool::Ellipse,
             "pen" => Tool::Pen,
-            _ => return Err(JsError::new("tool is select, rect, ellipse or pen")),
+            "text" => Tool::Text,
+            _ => return Err(JsError::new("tool is select, rect, ellipse, pen or text")),
         };
         self.session.set_tool(tool).map_err(to_js)
     }
@@ -947,7 +1009,8 @@ impl Editor {
     /// the artboard's place on screen. Sizes a label shows (frame width and
     /// height, the artboard's size) stay in document units. One call per
     /// frame, not one per node.
-    pub fn overlay(&self) -> Result<String, JsError> {
+    pub fn overlay(&mut self) -> Result<String, JsError> {
+        self.session.layout().map_err(to_js)?;
         let overlay = self.session.overlay().map_err(to_js)?;
         let artboard = self.session.document().artboard();
         to_json(&overlay_json(&overlay, self.view.to_screen(), artboard))
@@ -1067,7 +1130,31 @@ fn overlay_json(overlay: &Overlay, to_screen: Affine, artboard: Size) -> Value {
             "handles": edit.handles.iter().map(line).collect::<Vec<_>>(),
         });
     }
+    // Where the page puts its text field: the text box's space to the
+    // screen as a CSS matrix, and the type to set it in.
+    if let Some(text) = &overlay.text {
+        let [a, b, c, d, e, f] = (to_screen * text.transform).as_coeffs();
+        value["text"] = json!({
+            "id": encode_id(text.id),
+            "matrix": [a, b, c, d, e, f],
+            "content": text.content,
+            "family": text.style.family,
+            "size": text.style.size,
+            "lineHeight": text.style.line_height,
+            "align": align_name(text.style.align),
+            "width": text.bounds.width(),
+            "height": text.bounds.height(),
+        });
+    }
     value
+}
+
+fn align_name(align: TextAlign) -> &'static str {
+    match align {
+        TextAlign::Left => "left",
+        TextAlign::Center => "center",
+        TextAlign::Right => "right",
+    }
 }
 
 /// An exported image: straight-alpha RGBA rows, ready for `ImageData`.
@@ -1118,6 +1205,14 @@ fn properties_json(p: &Properties) -> Value {
     if let Some(width) = p.stroke_width {
         out["strokeWidth"] = shared(width, |w| json!(w));
     }
+    if let Some(text) = &p.text {
+        out["text"] = json!({
+            "family": shared(text.family.clone(), |f| json!(f)),
+            "size": shared(text.size, |s| json!(s)),
+            "lineHeight": shared(text.line_height, |h| json!(h)),
+            "align": shared(text.align, |a| json!(align_name(a))),
+        });
+    }
     out
 }
 
@@ -1154,6 +1249,20 @@ fn parse_property(change: &str) -> Result<Property, JsError> {
         })),
         "strokeColor" => Property::StrokeColor(colour(value)?),
         "strokeWidth" => Property::StrokeWidth(number()?),
+        "fontFamily" => Property::FontFamily(
+            value
+                .as_str()
+                .ok_or_else(|| invalid("expected a family name"))?
+                .to_owned(),
+        ),
+        "fontSize" => Property::FontSize(number()?),
+        "lineHeight" => Property::LineHeight(number()?),
+        "textAlign" => Property::TextAlign(match value.as_str() {
+            Some("left") => TextAlign::Left,
+            Some("center") => TextAlign::Center,
+            Some("right") => TextAlign::Right,
+            _ => return Err(invalid("expected left, center or right")),
+        }),
         _ => return Err(invalid(&format!("unknown property {key}"))),
     })
 }
@@ -1176,6 +1285,7 @@ fn mode_name(mode: Mode) -> &'static str {
     match mode {
         Mode::Pen => "pen",
         Mode::PathEdit => "path",
+        Mode::Text => "text",
     }
 }
 

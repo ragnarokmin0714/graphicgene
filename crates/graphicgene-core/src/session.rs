@@ -18,6 +18,7 @@
 //! One interaction at a time: starting anything else — a press, undo, a new
 //! selection — first abandons a property edit left open, as it does a drag.
 
+mod text;
 mod tools;
 
 use std::fmt;
@@ -27,6 +28,7 @@ use crate::color::LinearRgba;
 use crate::command::{Command, Journal};
 use crate::doc::{Changes, Document};
 use crate::error::Result;
+use crate::fonts::Fonts;
 use crate::geom::{Affine, BezPath, Point, Rect, Size, Vec2};
 use crate::gesture::{self, Frame, Gesture, Modifiers, ShapeKind, TransformKind};
 use crate::hit;
@@ -39,6 +41,8 @@ use crate::project::Project;
 use crate::properties::{self, Properties, Property, PropertyEdit};
 use crate::selection::Selection;
 
+use text::TextEdit;
+pub use text::TextView;
 use tools::Route;
 pub use tools::{Grab, PEN_STROKE_WIDTH, Pointer, Tool};
 
@@ -49,6 +53,8 @@ pub enum Mode {
     Pen,
     /// A path's anchors are being edited.
     PathEdit,
+    /// Text is being typed, in the shell's text field.
+    Text,
 }
 
 /// What a select-tool press should turn into.
@@ -64,6 +70,14 @@ pub enum SelectOutcome {
     Miss,
 }
 
+/// What a layer row shows as its icon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayerKind {
+    Group,
+    Vector,
+    Text,
+}
+
 /// One row of the layer panel.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerRow {
@@ -71,7 +85,7 @@ pub struct LayerRow {
     /// 0 for the root's children.
     pub depth: u32,
     pub name: String,
-    pub is_group: bool,
+    pub kind: LayerKind,
     pub visible: bool,
     pub locked: bool,
     pub opacity: f32,
@@ -129,6 +143,7 @@ pub struct Overlay {
     pub gesture: Option<&'static str>,
     pub pen: Option<PenView>,
     pub path: Option<EditView>,
+    pub text: Option<TextView>,
 }
 
 #[derive(Debug, Default)]
@@ -154,6 +169,15 @@ pub struct Session {
     /// Where the last press went, so the double-click that ends a pen path
     /// is not taken as one that edits it.
     last_route: Option<Route>,
+    /// Text being typed.
+    text_edit: Option<TextEdit>,
+    /// What text is set in. Not document state: a document names families,
+    /// and whoever opens it supplies them.
+    fonts: Fonts,
+    /// The fonts' version the last layout pass ran with.
+    fonts_seen: u64,
+    /// Bumped when the layout pass lays text out; see `glyphs_version`.
+    glyphs_version: u64,
     /// Bumped whenever a different document is loaded.
     generation: u64,
 }
@@ -209,6 +233,7 @@ impl Session {
     pub fn undo(&mut self) -> Result<bool> {
         self.cancel_gesture()?;
         self.cancel_property()?;
+        self.commit_text()?;
         if let Some(pen) = self.pen.as_mut() {
             if !pen.undo_anchor(&mut self.document)? {
                 let pen = self.pen.take().expect("checked above");
@@ -228,6 +253,7 @@ impl Session {
         }
         self.cancel_gesture()?;
         self.cancel_property()?;
+        self.commit_text()?;
         self.cancel_path_drag()?;
         let changed = self.journal.redo(&mut self.document)?;
         self.after_history_change(changed)?;
@@ -244,6 +270,9 @@ impl Session {
 
     /// Whether the document holds a preview that should not be saved yet: a
     /// drag, a pen path, a path-edit drag or a property edit in progress.
+    ///
+    /// Text being typed is not one: typing can last minutes, and what has
+    /// been typed is worth keeping if the tab closes before it is committed.
     pub fn busy(&self) -> bool {
         self.gesture.is_some()
             || self.pen.is_some()
@@ -269,6 +298,7 @@ impl Session {
         self.path_edit = None;
         self.property_edit = None;
         self.route = None;
+        self.text_edit = None;
         self.hover = None;
         self.document = project.document;
         self.journal.clear();
@@ -285,8 +315,19 @@ impl Session {
     /// Run the layout pass and hand over what changed since the last call:
     /// the start of every frame's render.
     pub fn prepare_render(&mut self) -> Result<Changes> {
-        layout::run(&mut self.document)?;
+        self.layout()?;
         Ok(self.document.take_changes())
+    }
+
+    /// Run the layout pass, so what it works out — text boxes above all —
+    /// is current. Costs nothing when nothing changed, so anything a view
+    /// reads that depends on layout (properties, the overlay) runs it first
+    /// rather than wait for the next frame's render.
+    pub fn layout(&mut self) -> Result<()> {
+        if layout::run(&mut self.document, &self.fonts, &mut self.fonts_seen)? {
+            self.glyphs_version += 1;
+        }
+        Ok(())
     }
 
     // ---- Layer panel -----------------------------------------------------------
@@ -329,7 +370,11 @@ impl Session {
                 id,
                 depth,
                 name: node.common.name.clone(),
-                is_group: matches!(node.kind, NodeKind::Group(_)),
+                kind: match node.kind {
+                    NodeKind::Group(_) => LayerKind::Group,
+                    NodeKind::Vector(_) => LayerKind::Vector,
+                    NodeKind::Text(_) => LayerKind::Text,
+                },
                 visible: node.common.visible,
                 locked: node.common.locked,
                 opacity: node.common.opacity,
@@ -594,6 +639,10 @@ impl Session {
             self.end_path_edit()?;
             return Ok(true);
         }
+        if self.editing_text() {
+            self.commit_text()?;
+            return Ok(true);
+        }
         Ok(false)
     }
 
@@ -602,6 +651,8 @@ impl Session {
             Some(Mode::Pen)
         } else if self.path_edit.is_some() {
             Some(Mode::PathEdit)
+        } else if self.text_edit.is_some() {
+            Some(Mode::Text)
         } else {
             None
         }
@@ -945,6 +996,13 @@ impl Session {
                 ..Overlay::default()
             });
         }
+        if let Some(view) = self.text_view()? {
+            return Ok(Overlay {
+                mode: Some(Mode::Text),
+                text: Some(view),
+                ..Overlay::default()
+            });
+        }
 
         let frame = match self.gesture.as_ref().and_then(Gesture::frame) {
             Some(frame) => Some(frame),
@@ -972,6 +1030,7 @@ impl Session {
             gesture: self.gesture.as_ref().map(Gesture::label),
             pen: None,
             path: None,
+            text: None,
         })
     }
 

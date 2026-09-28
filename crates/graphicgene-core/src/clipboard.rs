@@ -144,7 +144,7 @@ fn instantiate(doc: &mut Document, tree: Tree, commands: &mut Vec<Command>) -> N
             group.children.clear();
             children
         }
-        NodeKind::Vector(_) => Vec::new(),
+        NodeKind::Vector(_) | NodeKind::Text(_) => Vec::new(),
     };
     let id = doc.insert_detached(node);
     for (index, child) in children.into_iter().enumerate() {

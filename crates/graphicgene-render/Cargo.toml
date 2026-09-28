@@ -13,3 +13,6 @@ kurbo.workspace = true
 # gzipped wasm.
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 thiserror.workspace = true
+
+[dev-dependencies]
+graphicgene-core = { workspace = true, features = ["testing"] }

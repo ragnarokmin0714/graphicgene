@@ -161,14 +161,22 @@ window.HTMLCanvasElement.prototype.toBlob = function (callback, type) {
   setTimeout(() => callback(new Blob([JSON.stringify(summary)], { type })), 0);
 };
 
-// The wasm module is fetched from a file: URL, which Node's fetch refuses.
+// The wasm module is fetched from a file: URL, which Node's fetch refuses,
+// and fonts from paths the Vite dev server would serve: read both from disk.
 const nodeFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (!url.startsWith("file:")) return nodeFetch(input, init);
-  return new Response(await readFile(fileURLToPath(url)), {
-    headers: { "content-type": "application/wasm" },
-  });
+  if (url.startsWith("file:")) {
+    return new Response(await readFile(fileURLToPath(url)), {
+      headers: { "content-type": "application/wasm" },
+    });
+  }
+  if (url.startsWith("/")) {
+    const path = url.split("?")[0];
+    const file = path.startsWith("/@fs/") ? path.slice(4) : fileURLToPath(new URL(`..${path}`, import.meta.url));
+    return new Response(await readFile(file));
+  }
+  return nodeFetch(input, init);
 };
 
 // ---- The app ------------------------------------------------------------------
@@ -216,6 +224,16 @@ try {
   const { App } = await server.ssrLoadModule("/src/App.tsx");
   const { EditorHandle } = await server.ssrLoadModule("/src/editor.ts");
   const { resolveBackdrop } = await server.ssrLoadModule("/src/backdrop.ts");
+  // Fonts the app hands its core, in order, so a reference redraw can have
+  // the same ones — text is drawn from them. Kept per editor: a remounted
+  // app starts with none.
+  let app = { editor: null, fonts: [] };
+  const addFont = EditorHandle.prototype.addFont;
+  EditorHandle.prototype.addFont = function (sfnt) {
+    if (app.editor !== this) app = { editor: this, fonts: [] };
+    app.fonts.push(sfnt);
+    return addFont.call(this, sfnt);
+  };
 
   let root = await mount(App);
   const surface = () => document.querySelector("[data-viewport]");
@@ -335,6 +353,8 @@ try {
     const text = await downloadProject();
     const [zoom, panX, panY] = view();
     const reference = await EditorHandle.create(1, 1);
+    // Through the original: the reference's fonts are not the app's.
+    for (const sfnt of app.fonts) addFont.call(reference, sfnt);
     reference.loadJson(text);
     reference.setViewport(canvas().width, canvas().height, 1);
     reference.setView(zoom, panX, panY);
@@ -811,6 +831,60 @@ try {
   await act(async () => field("X").blur());
   await checkScreen("after the clipboard");
 
+  section("Text");
+  await key("Escape");
+  await key("Escape");
+  await key("t");
+  check(pressed("Text") === "true" && status().includes("Click to add text"), "T picks the text tool");
+  const textLayersBefore = layerCount();
+  await click(450, 500);
+  const typing = () => document.querySelector('textarea[aria-label="Text"]');
+  check(!!typing() && document.activeElement === typing(), "a click opens a text field, focused");
+  check(status().includes("Esc or click outside to finish"), "and says how to finish");
+  const type = (text) =>
+    act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set.call(typing(), text);
+      typing().dispatchEvent(new window.Event("input", { bubbles: true }));
+    });
+  await type("Hi 中");
+  await wait(20);
+  // The fonts arrive asynchronously: the Latin slices at start-up, the
+  // slice with 中 once the core says it is missing.
+  await wait(300);
+  const inked = () => {
+    let dark = 0;
+    for (let y = 505; y < 530; y += 1) for (let x = 452; x < 500; x += 1) if (screenPixel(x, y)[1] < 128) dark++;
+    return dark;
+  };
+  check(inked() > 20, `what is typed is drawn on the canvas as it is typed (${inked()} dark pixels)`);
+  check(app.fonts.length === 3, `the Latin slices, then the one with 中 (${app.fonts.length} fonts)`);
+  check(layerCount() === textLayersBefore + 1, "its layer row is there while typing");
+  await checkScreen("while typing");
+  await key("Escape");
+  check(!typing() && rowNames(1) === "Hi 中", `Escape finishes: a layer named after its text (${rowNames(1)})`);
+  check(pressed("Select") === "true", "and puts the text tool down");
+  check(layerRows()[0].querySelector("svg.lucide-type") !== null, "its row has the text icon");
+  await key("z", { ctrlKey: true });
+  check(layerCount() === textLayersBefore, "one undo takes the whole text away");
+  await key("z", { ctrlKey: true, shiftKey: true });
+
+  await clickRow("Hi 中");
+  check(value("Font size") === "24" && panel().textContent.includes("Noto Sans TC"), "the panel shows its font and size");
+  const narrow = frameOf();
+  await typeInto("Font size", "48");
+  check(value("Font size") === "48" && frameOf() !== narrow, `a new size lays it out again (${frameOf()})`);
+  await press(button("Align centre"));
+  check(button("Align centre").getAttribute("aria-pressed") === "true", "alignment is set from the panel");
+  await checkScreen("after restyling text");
+
+  await doubleClick(460, 520);
+  check(typing()?.value === "Hi 中", "a double-click types into it again");
+  await type("Hi 中文");
+  await wait(300);
+  await key("Escape");
+  check(rowNames(1) === "Hi 中文", `and the name follows the text (${rowNames(1)})`);
+  await checkScreen("after editing text");
+
   section("Files");
   // Radix opens a menu on pointerdown, not on click.
   const exportAs = async (label) => {
@@ -839,7 +913,7 @@ try {
 
   const project = await downloadProject();
   check(
-    downloads.at(-1).filename === "graphicgene-project.json" && JSON.parse(project).version === 1,
+    downloads.at(-1).filename === "graphicgene-project.json" && JSON.parse(project).version === 2,
     "the project downloads as versioned JSON",
   );
 

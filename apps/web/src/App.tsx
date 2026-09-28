@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SWATCHES } from "@/color";
 import type { EditorMode, Tool } from "@/editor";
 import { download, encodePng } from "@/files";
+import { loadBaseFonts, loadMissingFonts } from "@/fonts";
 import { Header } from "@/Header";
 import { type LayerActions, LayerPanel } from "@/LayerPanel";
 import { type PropertyActions, PropertiesPanel } from "@/PropertiesPanel";
@@ -39,12 +40,15 @@ function hintFor(tool: Tool, mode: EditorMode | null): string | null {
   if (mode === "path") {
     return "Drag points and handles · Click a segment to add a point · Double-click a point for corner/curve · Enter to finish";
   }
+  if (mode === "text") return "Type · Esc or click outside to finish";
   switch (tool) {
     case "pen":
       return "Click to add a point · Drag to pull out a curve";
     case "rect":
     case "ellipse":
       return "Drag to draw · Shift for equal sides · Alt from the centre";
+    case "text":
+      return "Click to add text · Click text to type into it";
     default:
       return null;
   }
@@ -173,6 +177,22 @@ export function App() {
     }
   };
 
+  // Fonts: each family's Latin slice once the core is up, then whatever
+  // characters the core could not set, each time it lays text out. This
+  // runs after the canvas has drawn — child effects first — so it sees the
+  // layout that drawing just did.
+  useEffect(() => {
+    if (!ready || !editor.current) return;
+    void loadBaseFonts(editor.current).then(() => run(() => {}));
+  }, [ready, run, editor]);
+  const glyphsSeen = useRef(0);
+  useEffect(() => {
+    const core = editor.current;
+    if (!core || core.glyphsVersion === glyphsSeen.current) return;
+    glyphsSeen.current = core.glyphsVersion;
+    void loadMissingFonts(core).then((added) => added && run(() => {}));
+  });
+
   // Restore the last session once the core is up.
   useEffect(() => {
     if (!ready) return;
@@ -277,6 +297,7 @@ export function App() {
     { key: "r", run: () => changeTool("rect") },
     { key: "o", run: () => changeTool("ellipse") },
     { key: "p", run: () => changeTool("pen") },
+    { key: "t", run: () => changeTool("text") },
     { key: "escape", run: escape },
     { key: "enter", run: enter },
     { key: "delete", run: () => run((editor) => editor.deleteSelection()) },

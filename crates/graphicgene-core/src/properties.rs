@@ -1,8 +1,8 @@
 //! The properties panel's view of the selection, and edits made through it.
 //!
 //! Reading: what the selected nodes have in common — the frame's position,
-//! size and rotation, opacity, fill and stroke — with `Shared::Mixed` where
-//! they differ.
+//! size and rotation, opacity, fill and stroke, and text's family, size,
+//! line height and alignment — with `Shared::Mixed` where they differ.
 //!
 //! Writing: a property edit previews straight into the document and commits
 //! as one journal entry, the same shape as a canvas drag. A slider dragged
@@ -20,12 +20,17 @@ use crate::error::Result;
 use crate::geom::{Affine, Vec2};
 use crate::gesture::Frame;
 use crate::node::{Node, NodeId, NodeKind, Stroke, VectorNode};
+use crate::text::{TextAlign, TextNode, TextStyle};
 
 /// The smallest width or height a field can set, in document units: a frame
 /// scaled to nothing could never be scaled back.
 const MIN_EXTENT: f64 = 0.01;
 /// A stroke added by picking a colour gets this width.
 const DEFAULT_STROKE_WIDTH: f64 = 1.0;
+/// The smallest font size a field can set, in document units.
+const MIN_FONT_SIZE: f64 = 1.0;
+/// The tightest line height a field can set, as a multiple of the size.
+const MIN_LINE_HEIGHT: f64 = 0.5;
 
 /// A value every selected node shares, or not.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,7 +39,7 @@ pub enum Shared<T> {
     Mixed,
 }
 
-impl<T: PartialEq + Copy> Shared<T> {
+impl<T: PartialEq> Shared<T> {
     /// `None` when there are no values at all.
     fn of(mut values: impl Iterator<Item = T>) -> Option<Self> {
         let first = values.next()?;
@@ -70,10 +75,20 @@ pub struct Properties {
     /// The width of the strokes there are. `None` when nothing selected has
     /// a stroke.
     pub stroke_width: Option<Shared<f64>>,
+    /// What the selected text has in common; `None` when there is none.
+    pub text: Option<TextProperties>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextProperties {
+    pub family: Shared<String>,
+    pub size: Shared<f64>,
+    pub line_height: Shared<f64>,
+    pub align: Shared<TextAlign>,
 }
 
 /// One change the panel can make.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Property {
     X(f64),
     Y(f64),
@@ -91,6 +106,12 @@ pub enum Property {
     /// Re-width strokes, keeping each one's colour; paths without a stroke
     /// are left alone.
     StrokeWidth(f64),
+    /// Text only, as are the rest.
+    FontFamily(String),
+    FontSize(f64),
+    /// A multiple of the font size.
+    LineHeight(f64),
+    TextAlign(TextAlign),
 }
 
 pub fn properties(doc: &Document, ids: &[NodeId]) -> Result<Option<Properties>> {
@@ -112,9 +133,26 @@ pub fn properties(doc: &Document, ids: &[NodeId]) -> Result<Option<Properties>> 
         .iter()
         .filter_map(|node| match &node.kind {
             NodeKind::Vector(vector) => Some(vector),
-            NodeKind::Group(_) => None,
+            _ => None,
         })
         .collect();
+    let texts: Vec<&TextNode> = nodes
+        .iter()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Text(text) => Some(text),
+            _ => None,
+        })
+        .collect();
+    let fills = vectors
+        .iter()
+        .map(|v| v.fill)
+        .chain(texts.iter().map(|t| t.fill));
+    let text = (!texts.is_empty()).then(|| TextProperties {
+        family: Shared::of(texts.iter().map(|t| t.style.family.clone())).expect("some text"),
+        size: Shared::of(texts.iter().map(|t| t.style.size)).expect("some text"),
+        line_height: Shared::of(texts.iter().map(|t| t.style.line_height)).expect("some text"),
+        align: Shared::of(texts.iter().map(|t| t.style.align)).expect("some text"),
+    });
     Ok(Some(Properties {
         count: ids.len(),
         x: top_left.x,
@@ -123,20 +161,50 @@ pub fn properties(doc: &Document, ids: &[NodeId]) -> Result<Option<Properties>> 
         height,
         rotation,
         opacity: Shared::of(nodes.iter().map(|n| n.common.opacity)).unwrap_or(Shared::Same(1.0)),
-        fill: Shared::of(vectors.iter().map(|v| v.fill)),
+        fill: Shared::of(fills),
         stroke: Shared::of(vectors.iter().map(|v| v.stroke.map(|s| s.color))),
         stroke_width: Shared::of(vectors.iter().filter_map(|v| v.stroke).map(|s| s.width)),
+        text,
     }))
 }
 
 /// What one selected node looked like when the edit began.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Snapshot {
     id: NodeId,
     transform: Affine,
     opacity: f32,
-    /// Fill and stroke, for vector nodes.
-    paint: Option<(Option<LinearRgba>, Option<Stroke>)>,
+    kind: Look,
+}
+
+/// What an edit can change beyond the transform and opacity.
+#[derive(Debug, Clone)]
+enum Look {
+    Group,
+    Vector {
+        fill: Option<LinearRgba>,
+        stroke: Option<Stroke>,
+    },
+    Text {
+        fill: Option<LinearRgba>,
+        style: TextStyle,
+    },
+}
+
+impl Look {
+    fn of(node: &Node) -> Self {
+        match &node.kind {
+            NodeKind::Group(_) => Look::Group,
+            NodeKind::Vector(v) => Look::Vector {
+                fill: v.fill,
+                stroke: v.stroke,
+            },
+            NodeKind::Text(t) => Look::Text {
+                fill: t.fill,
+                style: t.style.clone(),
+            },
+        }
+    }
 }
 
 /// An edit through the properties panel, from the first preview to its
@@ -155,10 +223,7 @@ impl PropertyEdit {
                 id,
                 transform: node.common.transform,
                 opacity: node.common.opacity,
-                paint: match &node.kind {
-                    NodeKind::Vector(v) => Some((v.fill, v.stroke)),
-                    NodeKind::Group(_) => None,
-                },
+                kind: Look::of(node),
             });
         }
         Ok(Self { base })
@@ -168,7 +233,7 @@ impl PropertyEdit {
     pub fn preview(&self, doc: &mut Document, property: Property) -> Result<()> {
         self.restore(doc)?;
         let ids: Vec<NodeId> = self.base.iter().map(|s| s.id).collect();
-        apply(doc, &ids, property)
+        apply(doc, &ids, &property)
     }
 
     /// Record what the previews left as one journal entry. Returns false,
@@ -186,16 +251,28 @@ impl PropertyEdit {
                 let opacity = node.common.opacity;
                 commands.push(Command::SetOpacity { id, opacity });
             }
-            if let (NodeKind::Vector(v), Some((fill, stroke))) = (&node.kind, snapshot.paint) {
-                if v.fill != fill {
-                    commands.push(Command::SetFill { id, fill: v.fill });
+            match (&node.kind, &snapshot.kind) {
+                (NodeKind::Vector(v), Look::Vector { fill, stroke }) => {
+                    if v.fill != *fill {
+                        commands.push(Command::SetFill { id, fill: v.fill });
+                    }
+                    if v.stroke != *stroke {
+                        commands.push(Command::SetStroke {
+                            id,
+                            stroke: v.stroke,
+                        });
+                    }
                 }
-                if v.stroke != stroke {
-                    commands.push(Command::SetStroke {
-                        id,
-                        stroke: v.stroke,
-                    });
+                (NodeKind::Text(t), Look::Text { fill, style }) => {
+                    if t.fill != *fill {
+                        commands.push(Command::SetFill { id, fill: t.fill });
+                    }
+                    if t.style != *style {
+                        let style = t.style.clone();
+                        commands.push(Command::SetTextStyle { id, style });
+                    }
                 }
+                _ => {}
             }
         }
         self.restore(doc)?;
@@ -216,17 +293,24 @@ impl PropertyEdit {
             let node = doc.get_mut(snapshot.id)?;
             node.common.transform = snapshot.transform;
             node.common.opacity = snapshot.opacity;
-            if let (NodeKind::Vector(v), Some((fill, stroke))) = (&mut node.kind, snapshot.paint) {
-                v.fill = fill;
-                v.stroke = stroke;
+            match (&mut node.kind, &snapshot.kind) {
+                (NodeKind::Vector(v), Look::Vector { fill, stroke }) => {
+                    v.fill = *fill;
+                    v.stroke = *stroke;
+                }
+                (NodeKind::Text(t), Look::Text { fill, style }) => {
+                    t.fill = *fill;
+                    t.style.clone_from(style);
+                }
+                _ => {}
             }
         }
         Ok(())
     }
 }
 
-fn apply(doc: &mut Document, ids: &[NodeId], property: Property) -> Result<()> {
-    match property {
+fn apply(doc: &mut Document, ids: &[NodeId], property: &Property) -> Result<()> {
+    match *property {
         Property::X(_)
         | Property::Y(_)
         | Property::Width(_)
@@ -249,7 +333,10 @@ fn apply(doc: &mut Document, ids: &[NodeId], property: Property) -> Result<()> {
                 doc.get_mut(id)?.common.opacity = opacity;
             }
         }
-        Property::Fill(fill) => paint(doc, ids, |v| v.fill = fill)?,
+        Property::Fill(fill) => {
+            paint(doc, ids, |v| v.fill = fill)?;
+            text(doc, ids, |t| t.fill = fill)?;
+        }
         Property::Stroke(stroke) => paint(doc, ids, |v| v.stroke = stroke)?,
         Property::StrokeColor(color) => paint(doc, ids, |v| {
             let width = v.stroke.map_or(DEFAULT_STROKE_WIDTH, |s| s.width);
@@ -267,6 +354,26 @@ fn apply(doc: &mut Document, ids: &[NodeId], property: Property) -> Result<()> {
                 }
             })?;
         }
+        Property::FontFamily(ref family) => text(doc, ids, |t| t.style.family.clone_from(family))?,
+        Property::FontSize(size) if size.is_finite() => {
+            text(doc, ids, |t| t.style.size = size.max(MIN_FONT_SIZE))?;
+        }
+        Property::LineHeight(height) if height.is_finite() => {
+            text(doc, ids, |t| {
+                t.style.line_height = height.max(MIN_LINE_HEIGHT)
+            })?;
+        }
+        Property::TextAlign(align) => text(doc, ids, |t| t.style.align = align)?,
+        Property::FontSize(_) | Property::LineHeight(_) => {}
+    }
+    Ok(())
+}
+
+fn text(doc: &mut Document, ids: &[NodeId], mut change: impl FnMut(&mut TextNode)) -> Result<()> {
+    for &id in ids {
+        if let NodeKind::Text(text) = &mut doc.get_mut(id)?.kind {
+            change(text);
+        }
     }
     Ok(())
 }
@@ -275,12 +382,12 @@ fn apply(doc: &mut Document, ids: &[NodeId], property: Property) -> Result<()> {
 /// or `None` for no change. No change has to be caught here: an identity
 /// composed through a rotated parent comes back a few ulps off, and would
 /// record an undo step for retyping a value.
-fn frame_delta(frame: &Frame, count: usize, property: Property) -> Option<Affine> {
+fn frame_delta(frame: &Frame, count: usize, property: &Property) -> Option<Affine> {
     let (Property::X(value)
     | Property::Y(value)
     | Property::Width(value)
     | Property::Height(value)
-    | Property::Rotation(value)) = property
+    | Property::Rotation(value)) = *property
     else {
         return None;
     };
@@ -289,7 +396,7 @@ fn frame_delta(frame: &Frame, count: usize, property: Property) -> Option<Affine
     }
     let [top_left, ..] = frame.corners();
     let (width, height) = frame.size();
-    let delta = match property {
+    let delta = match *property {
         Property::X(x) => Affine::translate(Vec2::new(x - top_left.x, 0.0)),
         Property::Y(y) => Affine::translate(Vec2::new(0.0, y - top_left.y)),
         Property::Width(w) => scale_from_corner(frame, stretch(w, width)?, 1.0)?,

@@ -26,18 +26,20 @@ and tagged `v0.2.0`: zoom and pan, with the canvas covering the stage in
 device pixels so it is sharp on HiDPI screens; the properties panel; the
 layer panel's operations (rename, hide, lock, reorder, group); copy, cut,
 paste and duplicate; PNG export; and canvas input routed through the
-session. What is next, and the known architectural debt, is in
-`ROADMAP.md`.
+session. v0.3, text, followed the same day and is tagged `v0.3.0`: a text
+tool typed through the browser's own text field, so Chinese input works,
+set by the core in Noto Sans TC or Inter, fonts fetched as the text needs
+them. What is next, and the known architectural debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 126 tests, including a randomized check that
+- `cargo test --workspace` — 137 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 164
+- `pnpm ui` — the React app driven in jsdom against the real core: 182
   checks, including zoom and pan, the properties panel and its colour
   picker, the layer panel's rename, toggles and drag to reorder, the
   clipboard, and that the canvas equals a full redraw of the same document
@@ -112,8 +114,8 @@ Photoshop / Figma / desktop directions stay open.
   `Rc<RefCell<..>>`. Arena storage is cache-friendly, serializable, and provides
   the stable identity that components and collaboration both depend on.
 - `NodeKind` is an enum, not a trait object. `dyn` hurts both serialization and
-  hot-path performance; adding `Raster` / `Component` / `Text` later is a new
-  variant plus match arms the compiler will point us at.
+  hot-path performance; adding `Raster` / `Component` later is a new variant
+  plus match arms the compiler will point us at — as `Text` was, in v0.3.
 - Geometry is `f64` in the document, `f32` at render time. A design tool loses
   precision visibly when zoomed if the model itself is f32.
 - Every node carries `transform` (affine), `opacity`, `blend_mode`, and `clip`
@@ -135,8 +137,12 @@ Editing and drawing are separate stages, always:
 document (arena) -> layout pass -> RenderScene (immutable snapshot) -> Renderer
 ```
 
-- The **layout pass** is a no-op in v0.1. It exists so Figma-style auto layout
-  has a place to live that is already wired into the pipeline.
+- The **layout pass** sets text: each text node's glyph outlines and box,
+  redone when its content, its style or the fonts at hand change, and free
+  on a frame where none did. Figma-style auto layout will live there too.
+  A view that reads what layout works out — the properties panel, the
+  overlay — runs `Session::layout` first: React renders before the canvas
+  draws, so waiting for the frame's layout shows last frame's sizes.
 - `RenderScene` is a flat snapshot. The renderer never walks the live
   document.
 - **Only what changed is redrawn.** Every node mutation goes through
@@ -274,6 +280,31 @@ was typed for. The colour picker's HSV and hex maths (`color.ts`) is display
 maths over sRGB bytes; converting to the document's linear colour is the
 core's job.
 
+### Text
+
+- **Shaping is deliberately simple:** `ttf-parser` for cmap, advances,
+  GPOS or `kern` pair kerning, and outlines (`text.rs`). Measured in wasm
+  it costs 41 KB gzipped, against 232 KB for rustybuzz and 309 KB for
+  harfrust with skrifa. It sets Latin, Greek, Cyrillic and Chinese,
+  Japanese and Korean correctly; Arabic, Indic and Thai, and ligatures, it
+  does not. A full shaper would replace `shape_line` alone.
+- **Fonts are session state, not document state.** A document names
+  families; whoever opens it supplies the faces (`Session::add_font`, sfnt
+  bytes — core does no IO). The core reports the characters it could not
+  set (`missing_glyphs`), and the web app fetches just the slices that
+  cover them — Noto Sans TC and Inter from Fontsource, WOFF sliced by
+  unicode range, decoded with the browser's `DecompressionStream`
+  (`fonts.ts`).
+- **Typing goes through a browser text field** over the text box, because
+  input methods for Chinese and every other language live there. Its text
+  is transparent: what shows is the core's layout, drawn from what the
+  field holds on every change. The field is set in the same font, size and
+  line height, and the core's line boxes follow CSS's half-leading, so the
+  caret sits where the glyphs are; neither side makes ligatures.
+- New text reaches the journal only when committed with something in it,
+  as one step. Typing is not `busy`: it can last minutes, and autosave
+  keeps what has been typed.
+
 ### Why React rather than an all-Rust UI
 
 A design tool is mostly UI chrome: panels, menus, property inspectors,
@@ -338,6 +369,9 @@ DOM-rendering Rust framework such as Dioxus, not an immediate-mode toolkit.
 
 Versioned JSON, backward compatible from v0.1 onward. The `version` field is read
 before anything else, and unknown fields round-trip rather than being dropped.
+Version 2 (v0.3) added text nodes; a build reads every version up to its own,
+so a v0.2 build refuses a file with text by its version, not by failing on
+the text.
 
 - serde_json's `float_roundtrip` feature is load-bearing: without it, parsing
   can be one ulp off, and since autosave re-reads the project on every visit,
@@ -358,7 +392,9 @@ demands them, not in advance.
 The core modules in the order data flows: `doc` (arena + change log),
 `command` (journal), `session` (the rules), then what the session drives —
 `selection`, `hit`, `gesture`, `anchors`, `pen`, `path_edit`, `properties`,
-`layers`, `clipboard` — and the outputs: `layout`, `svg`, `project`.
+`layers`, `clipboard` — then `fonts` and `text`, and the outputs: `layout`,
+`svg`, `project`. `testing` (behind a feature, for tests only) builds a font
+in code.
 
 ```
 graphicgene/
@@ -379,7 +415,8 @@ graphicgene/
 ```
 
 `graphicgene-core` stays dependency-light (`kurbo`, `slotmap`, `serde`,
-`thiserror`); heavy rendering dependencies stay in `graphicgene-render`.
+`thiserror`, and `ttf-parser` for text); heavy rendering dependencies stay
+in `graphicgene-render`.
 
 `apps/desktop` (Tauri) and `packages/ui` are created when they are built, not
 before. The crate prefix matches gamegene's `gamegene-*` convention — `gg-` is
@@ -435,9 +472,10 @@ Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 875 KB | 340 KB |
-| js (React + Radix + app) | 432 KB | 136 KB |
-| css (incl. tw-animate-css) | 44 KB | 8 KB |
+| wasm (wasm-opt applied) | 999 KB | 393 KB |
+| js (React + Radix + app) | 467 KB | 150 KB |
+| js chunk: Noto Sans TC's unicode ranges, fetched after start-up | 82 KB | 34 KB |
+| css (incl. tw-animate-css) | 45 KB | 8 KB |
 | font (Inter, latin subset) | 48 KB | — |
 
 The browser fetches only the Inter subsets whose unicode-range the page uses,
@@ -478,7 +516,8 @@ clean. Before trusting a local clippy run, `rustup check`; if stable has
 moved, update it (or run `cargo +<version> clippy …` with CI's version).
 
 Supply chain is the one real security surface here, so keep the dependency
-count low — it is the reason core takes four crates and not fourteen.
+count low — it is the reason core takes five crates and not fourteen. The
+Fontsource packages the web app takes are font files and metadata, no code.
 
 The one deliberate exception is dev-only: `jsdom` and `fake-indexeddb` (about
 30 packages) run `pnpm ui`, the only check of the React layer in CI. None of

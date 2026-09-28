@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolveBackdrop } from "@/backdrop";
 import { Canvas } from "@/Canvas";
 import { PEN_CURSOR } from "@/cursors";
@@ -12,8 +12,10 @@ import type {
   PenOverlay,
   Point,
   Rgba,
+  TextOverlay,
   Tool,
 } from "@/editor";
+import { FALLBACK } from "@/fonts";
 import { HANDLE_SIZE, handleAt, handlesOf } from "@/handles";
 
 type Props = {
@@ -334,7 +336,74 @@ export function Stage({ editor, revision, run, tool, nextFill }: Props) {
     >
       <Canvas editor={editor} revision={revision} />
       {overlay && <OverlayLayer overlay={overlay} />}
+      {overlay?.text && <TextField key={overlay.text.id} text={overlay.text} run={run} />}
     </div>
+  );
+}
+
+/**
+ * Where text is typed: a browser text field over the text box, because that
+ * is where input methods for Chinese and every other language live.
+ *
+ * The field shows only the caret and the selection — its own text is
+ * transparent. What you see is the core's layout, drawn on the canvas from
+ * what the field holds, sent on every change; the field is set in the same
+ * font, size and line height so its caret sits where the core draws. It
+ * does not scroll, and has room to spare on the side the text grows
+ * towards, so a keystroke never shifts it before the core catches up.
+ */
+function TextField({ text, run }: { text: TextOverlay; run: Props["run"] }) {
+  const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const element = field.current;
+    if (!element) return;
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  }, []);
+  useLayoutEffect(() => {
+    const element = field.current;
+    if (element) element.scrollLeft = element.scrollTop = 0;
+  });
+
+  const line = text.size * text.lineHeight;
+  const slack = text.size * 2;
+  const shift = text.align === "left" ? 0 : text.align === "center" ? -slack / 2 : -slack;
+  return (
+    <textarea
+      ref={field}
+      aria-label="Text"
+      defaultValue={text.content}
+      spellCheck={false}
+      autoComplete="off"
+      className="caret-primary selection:bg-primary/25 absolute top-0 left-0 m-0 resize-none overflow-hidden border-0 bg-transparent p-0 whitespace-pre text-transparent outline-none"
+      // Geometry from the core, so inline: the text box's place on screen.
+      style={{
+        width: text.width + slack,
+        height: text.height + line,
+        transform: `matrix(${text.matrix.join(",")}) translateX(${shift}px)`,
+        transformOrigin: "0 0",
+        fontFamily: `"${text.family}", "${FALLBACK}"`,
+        fontSize: text.size,
+        lineHeight: `${line}px`,
+        textAlign: text.align,
+        fontKerning: "normal",
+        // The core draws no ligatures, so the field's caret must not expect them.
+        fontVariantLigatures: "none",
+      }}
+      // Presses in the field place the caret; they are not canvas presses.
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onInput={(event) => {
+        const content = event.currentTarget.value;
+        run((ed) => ed.previewText(content));
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          run((ed) => ed.escape());
+        }
+      }}
+    />
   );
 }
 

@@ -11,7 +11,13 @@ use serde_json::{Map, Value};
 use crate::doc::Document;
 use crate::error::{CoreError, Result};
 
-pub const FORMAT_VERSION: u32 = 1;
+/// The version this build writes. It reads every version up to it.
+///
+/// - 1: v0.1 and v0.2.
+/// - 2: text nodes (v0.3). Nothing else changed, so a build that reads 2
+///   reads 1 as it always did; a v0.2 build refuses a 2 by its version
+///   instead of failing on the text inside.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {

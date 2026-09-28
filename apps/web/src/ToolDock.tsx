@@ -1,4 +1,4 @@
-import { Circle, MousePointer2, PenTool, Redo2, Square, Undo2 } from "lucide-react";
+import { Circle, MousePointer2, PenTool, Redo2, Square, Type, Undo2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import type { Tool } from "@/editor";
 import { IconButton } from "@/IconButton";
@@ -19,6 +19,7 @@ const TOOLS: { tool: Tool; label: string; icon: React.ReactNode; key: string }[]
   { tool: "rect", label: "Rectangle", icon: <Square />, key: "R" },
   { tool: "ellipse", label: "Ellipse", icon: <Circle />, key: "O" },
   { tool: "pen", label: "Pen", icon: <PenTool />, key: "P" },
+  { tool: "text", label: "Text", icon: <Type />, key: "T" },
 ];
 
 /**

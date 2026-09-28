@@ -14,6 +14,7 @@ pub mod color;
 pub mod command;
 pub mod doc;
 pub mod error;
+pub mod fonts;
 pub mod geom;
 pub mod gesture;
 pub mod hit;
@@ -27,6 +28,9 @@ pub mod properties;
 pub mod selection;
 pub mod session;
 pub mod svg;
+#[cfg(feature = "testing")]
+pub mod testing;
+pub mod text;
 pub mod view;
 
 pub use color::LinearRgba;
