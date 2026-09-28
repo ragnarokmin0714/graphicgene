@@ -20,6 +20,7 @@
 
 use std::fmt;
 
+use crate::clipboard;
 use crate::color::LinearRgba;
 use crate::command::{Command, Journal};
 use crate::doc::{Changes, Document};
@@ -843,6 +844,53 @@ impl Session {
         ids.extend(freed);
         self.selection.set(ids);
         self.hover = None;
+        Ok(true)
+    }
+
+    // ---- Clipboard -----------------------------------------------------------------
+    //
+    // Text in and out; the shell moves it through the system clipboard.
+
+    /// The selection as clipboard text; `None` with nothing selected.
+    pub fn copy_selection(&self) -> Result<Option<String>> {
+        clipboard::copy(&self.document, self.selection.ids())
+    }
+
+    /// Copy the selection, then delete it as one undo step.
+    pub fn cut_selection(&mut self) -> Result<Option<String>> {
+        self.end_interaction()?;
+        let text = self.copy_selection()?;
+        if text.is_some() {
+            self.delete_selection()?;
+        }
+        Ok(text)
+    }
+
+    /// Paste clipboard text on top of the document, where it was copied
+    /// from; what was pasted becomes the selection. False for text that is
+    /// not graphicgene nodes.
+    pub fn paste(&mut self, text: &str) -> Result<bool> {
+        self.end_interaction()?;
+        let root = self.document.root();
+        let Some((command, pasted)) = clipboard::paste(&mut self.document, text, root)? else {
+            return Ok(false);
+        };
+        self.execute(command)?;
+        self.selection.set(pasted);
+        Ok(true)
+    }
+
+    /// Copy the selection in place, each copy right above its original; the
+    /// copies become the selection.
+    pub fn duplicate_selection(&mut self) -> Result<bool> {
+        self.end_interaction()?;
+        let Some((command, copies)) =
+            clipboard::duplicate(&mut self.document, self.selection.ids())?
+        else {
+            return Ok(false);
+        };
+        self.execute(command)?;
+        self.selection.set(copies);
         Ok(true)
     }
 

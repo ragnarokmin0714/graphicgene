@@ -534,6 +534,29 @@ export class EditorHandle {
     return this.inner.ungroup();
   }
 
+  // Clipboard: the core hands over text and takes it back; the page moves
+  // it through the system clipboard.
+
+  /** The selection as clipboard text, or null with nothing selected. */
+  copy(): string | null {
+    return this.inner.copy() ?? null;
+  }
+
+  /** Copy the selection, then delete it: one undo step. */
+  cut(): string | null {
+    return this.inner.cut() ?? null;
+  }
+
+  /** Paste where it was copied from; false for text that is not ours. */
+  paste(text: string): boolean {
+    return this.inner.paste(text);
+  }
+
+  /** Copy the selection in place, each copy right above its original. */
+  duplicate(): boolean {
+    return this.inner.duplicate();
+  }
+
   layers(): LayerRow[] {
     return JSON.parse(this.inner.layerTree()) as LayerRow[];
   }

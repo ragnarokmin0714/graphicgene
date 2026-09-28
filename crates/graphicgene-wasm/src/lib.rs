@@ -494,6 +494,31 @@ impl Editor {
         self.session.ungroup_selection().map_err(to_js)
     }
 
+    // ---- Clipboard -------------------------------------------------------------------
+    //
+    // Text in and out: the page moves it through the system clipboard.
+
+    /// The selection as clipboard text; undefined with nothing selected.
+    pub fn copy(&self) -> Result<Option<String>, JsError> {
+        self.session.copy_selection().map_err(to_js)
+    }
+
+    /// Copy the selection, then delete it as one undo step.
+    pub fn cut(&mut self) -> Result<Option<String>, JsError> {
+        self.session.cut_selection().map_err(to_js)
+    }
+
+    /// Paste clipboard text where it was copied from; false for text that
+    /// is not graphicgene nodes.
+    pub fn paste(&mut self, text: &str) -> Result<bool, JsError> {
+        self.session.paste(text).map_err(to_js)
+    }
+
+    /// Copy the selection in place, each copy right above its original.
+    pub fn duplicate(&mut self) -> Result<bool, JsError> {
+        self.session.duplicate_selection().map_err(to_js)
+    }
+
     // ---- Properties panel ----------------------------------------------------------
     //
     // Values here are what the user types — document units, degrees — not

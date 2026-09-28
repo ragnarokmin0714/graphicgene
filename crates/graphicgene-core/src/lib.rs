@@ -9,6 +9,7 @@
 //!    app layer implements.
 
 pub mod anchors;
+pub mod clipboard;
 pub mod color;
 pub mod command;
 pub mod doc;

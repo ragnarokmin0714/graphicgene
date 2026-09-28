@@ -307,4 +307,28 @@ assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to")
   assert.equal(layered.beginMove(25, 5), false, "and the canvas cannot move it");
 }
 
+// Clipboard: text out, text in, landing where it came from with fresh ids.
+{
+  const source = new Editor(W, H);
+  const original = source.addRect(10, 10, 20, 20, RED);
+  source.selectLayer(original, false);
+  const text = source.copy();
+  assert.equal(JSON.parse(text).type, "graphicgene/nodes");
+  const target = new Editor(W, H);
+  assert.equal(target.paste(text), true);
+  assert.equal(target.paste("hello"), false, "text that is not ours");
+  assert.ok(JSON.parse(target.layerTree())[0].selected, "pasted and selected");
+  assert.deepEqual(pixel(draw(target), 20, 20), [255, 0, 0, 255], "where it was copied from");
+  // Ids only mean something within one document: paste back into the source.
+  assert.equal(source.paste(text), true);
+  const [copy, first] = JSON.parse(source.layerTree());
+  assert.ok(first.id === original && copy.id !== original, "a paste gets a fresh id");
+  assert.equal(target.duplicate(), true);
+  assert.equal(JSON.parse(target.layerTree()).length, 2);
+  assert.ok(target.cut());
+  assert.equal(JSON.parse(target.layerTree()).length, 1);
+  target.clearSelection();
+  assert.equal(target.copy(), undefined, "nothing selected, nothing copied");
+}
+
 console.log("smoke: ok");

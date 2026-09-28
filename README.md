@@ -13,8 +13,9 @@ them.
 > **Status: v0.1 preview, v0.2 under way.** Draw rectangles, ellipses and
 > bezier paths; select, move, scale and rotate them; edit any path point by
 > point; set position, size, rotation, opacity, fill and stroke in a
-> properties panel; rename, hide, lock, reorder and group layers; zoom and
-> pan, sharp on HiDPI screens; undo everything.
+> properties panel; rename, hide, lock, reorder and group layers; copy,
+> paste and duplicate; zoom and pan, sharp on HiDPI screens; undo
+> everything.
 > Work autosaves in the browser, project files can be downloaded and
 > reopened, and the artwork exports as SVG. What comes next is in
 > [`ROADMAP.md`](ROADMAP.md).
@@ -32,6 +33,7 @@ them.
 | Properties panel | Type a value and press `Enter`; `↑` `↓` step it (`Shift` for 10); drag a field's label sideways to scrub; `Esc` puts back what was being typed or scrubbed |
 | Colour swatch | Opens a picker: drag in the square or along the hue and opacity strips, or pick a preset |
 | Layers panel | Double-click a name to rename it; the eye and lock on a row hide and lock it; drag rows to reorder, onto the middle of a group to put them inside; right-click for more |
+| `Ctrl/⌘ C` `X` `V`, `Ctrl/⌘ D` | Copy, cut, paste — in place, into this document or another tab's — and duplicate |
 | `Ctrl/⌘ G`, `Ctrl/⌘ Shift G` | Group, ungroup |
 | `Ctrl/⌘ ]` `[`, with `Shift` | Bring forward, send backward — with `Shift`, to the front or back |
 | `Ctrl/⌘ Shift H`, `Ctrl/⌘ Shift L` | Hide or show, lock or unlock the selection |

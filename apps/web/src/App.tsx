@@ -109,9 +109,38 @@ export function App() {
       toggleVisible: () => run((editor) => editor.toggleVisible()),
       toggleLocked: () => run((editor) => editor.toggleLocked()),
       remove: () => run((editor) => editor.deleteSelection()),
+      duplicate: () => run((editor) => editor.duplicate()),
     }),
     [run],
   );
+
+  // Copy, cut and paste arrive as the browser's clipboard events, the one
+  // place a page may use the system clipboard without asking. A text field
+  // keeps its own; everything else is the document's.
+  useEffect(() => {
+    const inTextField = (target: EventTarget | null) =>
+      target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]");
+    const onCopy = (event: ClipboardEvent) => {
+      if (inTextField(event.target) || !event.clipboardData) return;
+      const text = run((editor) => (event.type === "cut" ? editor.cut() : editor.copy()));
+      if (!text) return;
+      event.clipboardData.setData("text/plain", text);
+      event.preventDefault();
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      if (inTextField(event.target)) return;
+      const text = event.clipboardData?.getData("text/plain");
+      if (text && run((editor) => editor.paste(text))) event.preventDefault();
+    };
+    document.addEventListener("copy", onCopy);
+    document.addEventListener("cut", onCopy);
+    document.addEventListener("paste", onPaste);
+    return () => {
+      document.removeEventListener("copy", onCopy);
+      document.removeEventListener("cut", onCopy);
+      document.removeEventListener("paste", onPaste);
+    };
+  }, [run]);
 
   const propertyActions: PropertyActions = useMemo(
     () => ({
@@ -265,6 +294,7 @@ export function App() {
     { key: "delete", run: () => run((editor) => editor.deleteSelection()) },
     { key: "backspace", run: () => run((editor) => editor.deleteSelection()) },
     { key: "a", mod: true, run: () => run((editor) => editor.selectAll()) },
+    { key: "d", mod: true, run: layerActions.duplicate },
     { key: "g", mod: true, run: layerActions.group },
     { key: "g", mod: true, shift: true, run: layerActions.ungroup },
     // By position, not character: Shift turns "]" into "}" on most layouts.

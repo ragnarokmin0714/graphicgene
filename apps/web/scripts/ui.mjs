@@ -755,6 +755,54 @@ try {
   await key("z", { ctrlKey: true });
   await checkScreen("after the layer panel");
 
+  section("Clipboard");
+  // A browser's clipboard event, with the data jsdom leaves out.
+  const clipboardEvent = (type, text) => {
+    const event = new window.Event(type, { bubbles: true, cancelable: true });
+    const data = text === undefined ? {} : { "text/plain": text };
+    event.clipboardData = {
+      setData: (kind, value) => void (data[kind] = value),
+      getData: (kind) => data[kind] ?? "",
+    };
+    return { event, data };
+  };
+  const countBefore = layerCount();
+  await clickRow("Alpha");
+  const copied = clipboardEvent("copy");
+  await fire(document.body, copied.event);
+  const text = copied.data["text/plain"];
+  check(copied.event.defaultPrevented && JSON.parse(text).type === "graphicgene/nodes", "copying puts the selection on the clipboard");
+  await fire(document.body, clipboardEvent("paste", text).event);
+  check(layerCount() === countBefore + 1 && rowNames(2) === "Alpha,Alpha", "pasting adds it on top");
+  check(frameOf() === "150 250 100 60" && status().includes("1 selected"), "where it was copied from, selected");
+  await key("z", { ctrlKey: true });
+  check(layerCount() === countBefore, "one undo step");
+
+  await clickRow("Alpha");
+  await key("d", { ctrlKey: true });
+  check(layerCount() === countBefore + 1 && rowNames(2) === "Alpha,Alpha", "Ctrl+D duplicates in place");
+  await key("z", { ctrlKey: true });
+
+  await clickRow("Alpha");
+  const cut = clipboardEvent("cut");
+  await fire(document.body, cut.event);
+  check(layerCount() === countBefore - 1 && !!cut.data["text/plain"], "cutting copies and deletes");
+  await fire(document.body, clipboardEvent("paste", cut.data["text/plain"]).event);
+  check(layerCount() === countBefore && rowNames(1) === "Alpha", "and it pastes back");
+
+  const foreign = clipboardEvent("paste", "just some words");
+  await fire(document.body, foreign.event);
+  check(
+    !foreign.event.defaultPrevented && layerCount() === countBefore && !document.querySelector('[role="alert"]'),
+    "pasting anything else does nothing, quietly",
+  );
+  await act(async () => field("X").focus());
+  const inField = clipboardEvent("copy");
+  await fire(field("X"), inField.event);
+  check(!inField.event.defaultPrevented && !inField.data["text/plain"], "a text field keeps its own clipboard");
+  await act(async () => field("X").blur());
+  await checkScreen("after the clipboard");
+
   section("Files");
   await press([...document.querySelectorAll("header button")].find((b) => b.textContent.includes("Export SVG")));
   const svg = downloads.at(-1);

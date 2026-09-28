@@ -27,6 +27,7 @@ export type LayerActions = {
   toggleVisible: () => void;
   toggleLocked: () => void;
   remove: () => void;
+  duplicate: () => void;
 };
 
 type Props = {
@@ -246,6 +247,10 @@ export const LayerPanel = memo(function LayerPanel({ layers, actions }: Props) {
                   keeps it. */}
               <ContextMenuContent className="min-w-48" onCloseAutoFocus={(event) => event.preventDefault()}>
                 <ContextMenuItem onSelect={() => setRenaming(layer.id)}>Rename</ContextMenuItem>
+                <ContextMenuItem onSelect={actions.duplicate}>
+                  Duplicate
+                  <ContextMenuShortcut>{MOD} D</ContextMenuShortcut>
+                </ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem onSelect={actions.group}>
                   Group selection
