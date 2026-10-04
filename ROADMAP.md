@@ -41,16 +41,25 @@ v0.3 shapes simply with `ttf-parser` — cmap, advances, pair kerning — at
 41 KB. Fonts are Noto Sans TC and Inter from Fontsource, fetched slice by
 slice as the text needs them; the core says what is missing.
 
-## v0.4 — desktop
+## v0.4 — desktop · step 1 built
 
 The test of the architecture, in two steps:
 
-1. **The same web app in a Tauri webview.** Only storage changes: files on
-   disk instead of IndexedDB. If the IO-boundary rule held, core does not
-   change at all.
+1. ~~**The same web app in a Tauri webview.**~~ **Built 2026-10-05.** Only
+   storage changed: the autosave is `autosave.json` in the app's data
+   folder, and opening, saving and exporting go through the system's
+   dialogs. The rule held — the core did not change; `platform.ts` picks the
+   IO, and the desktop half is a chunk the web never fetches. The page's
+   file access is four commands of our own (`apps/desktop/src-tauri/src/files.rs`),
+   not Tauri's fs plugin, so it writes only where the user picked. The
+   Desktop workflow builds Windows, macOS and Linux installers, and drafts
+   a release with them on a version tag. Owed: a look at the real window on
+   Windows — this box has no display, and its webview's CSP (wasm, inline
+   styles) is checked only by reading it.
 2. **The core running natively**, behind Tauri commands, once threads or a
    GPU renderer are worth it. The session API is already shell-agnostic;
-   this is a new shell, not a new core.
+   this is a new shell, not a new core. Not started: nothing needs threads
+   or a GPU yet.
 
 ## Later
 

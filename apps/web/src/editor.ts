@@ -581,7 +581,7 @@ export class EditorHandle {
 
   /**
    * Core does no IO — it hands back bytes and the caller decides where they
-   * go. IndexedDB here; `std::fs` in the future desktop app.
+   * go: IndexedDB in a browser, a file in the desktop app (`platform.ts`).
    */
   toJson(): string {
     return this.inner.toJson();

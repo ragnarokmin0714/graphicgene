@@ -10,14 +10,16 @@ them.
 
 **Try it:** <https://ragnarokmin0714.github.io/graphicgene/>
 
-> **Status: v0.3 preview.** Draw rectangles, ellipses, bezier paths and
+> **Status: v0.4 preview.** Draw rectangles, ellipses, bezier paths and
 > text — Chinese included; select, move, scale and rotate them; edit any path point by
 > point; set position, size, rotation, opacity, fill and stroke in a
 > properties panel; rename, hide, lock, reorder and group layers; copy,
 > paste and duplicate; zoom and pan, sharp on HiDPI screens; undo
 > everything.
 > Work autosaves in the browser, project files can be downloaded and
-> reopened, and the artwork exports as SVG or PNG. What comes next is in
+> reopened, and the artwork exports as SVG or PNG. The same app also runs in
+> a desktop window on Windows, macOS and Linux, saving to files — installers
+> are attached to each release. What comes next is in
 > [`ROADMAP.md`](ROADMAP.md).
 
 ## Using it
@@ -52,7 +54,7 @@ document (arena + change log) → layout pass → RenderScene → Renderer → p
           ▲                                     (updated in place;    (only the
     editing session                              reports damage)      damaged rect)
           ▲
-   platform shell (wasm today, desktop later) ◄── React UI
+   wasm shell, in a browser tab or a desktop window ◄── React UI
 ```
 
 | Crate | Responsibility |
@@ -63,7 +65,9 @@ document (arena + change log) → layout pass → RenderScene → Renderer → p
 
 The UI (`apps/web`) is React, Tailwind and shadcn, and holds **no** document
 state: the document lives in Rust, and React renders a view of it and sends
-commands back. A desktop shell would drive the same session.
+commands back. The desktop app (`apps/desktop`, Tauri) shows this same web
+app in a window; only where files go differs — a file and the system's
+dialogs instead of IndexedDB and downloads.
 
 Only what changes is redrawn, and pixels never cross the wasm boundary by
 copy. With 500 shapes on the artboard, a frame of dragging one of them costs
@@ -81,8 +85,15 @@ and pnpm.
 
 ```sh
 pnpm install
-pnpm dev      # builds the wasm package, then starts Vite
+pnpm dev            # builds the wasm package, then starts Vite
+pnpm desktop        # the same, in a desktop window
+pnpm build:desktop  # an installer for this system
 ```
+
+The desktop app builds with [Tauri](https://tauri.app). Windows and macOS
+need nothing more; Linux needs the system webview's development libraries
+(on Ubuntu: `libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev
+libayatana-appindicator3-dev librsvg2-dev`).
 
 ## Checks
 

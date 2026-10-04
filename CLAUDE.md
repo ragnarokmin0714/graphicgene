@@ -29,7 +29,10 @@ paste and duplicate; PNG export; and canvas input routed through the
 session. v0.3, text, followed the same day and is tagged `v0.3.0`: a text
 tool typed through the browser's own text field, so Chinese input works,
 set by the core in Noto Sans TC or Inter, fonts fetched as the text needs
-them. What is next, and the known architectural debt, is in `ROADMAP.md`.
+them. v0.4 put the same web app in a desktop window (Tauri, `apps/desktop`):
+only storage differs — the autosave is a file, and projects and exports go
+through the system's open and save dialogs — and the core did not change.
+What is next, and the known architectural debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
@@ -39,11 +42,16 @@ them. What is next, and the known architectural debt, is in `ROADMAP.md`.
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 182
+- `pnpm ui` — the React app driven in jsdom against the real core: 197
   checks, including zoom and pan, the properties panel and its colour
   picker, the layer panel's rename, toggles and drag to reorder, the
-  clipboard, and that the canvas equals a full redraw of the same document
+  clipboard, the desktop app's storage through a stand-in for its Rust
+  commands, and that the canvas equals a full redraw of the same document
   at the same view
+- for `apps/desktop`, in its own directory: `cargo fmt -- --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo test`. These need the
+  system webview's development libraries (below); the Desktop workflow runs
+  them on Linux and builds the installers on all three systems
 
 Anything on a per-frame path also gets `pnpm bench` before and after; see
 Performance rules.
@@ -69,13 +77,19 @@ pnpm build        # production build of the web app
 pnpm smoke        # wasm boundary end-to-end, no browser needed
 pnpm ui           # the React app in jsdom against the real core
 pnpm bench        # per-frame costs; compare before and after perf work
+pnpm desktop      # the desktop app, in a window, against the Vite dev server
+pnpm build:desktop  # the desktop app's installer for this system
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings   # what CI runs
 cargo fmt --all
 ```
 
 `wasm-pack` is required for anything that touches the web app
-(`cargo install wasm-pack`).
+(`cargo install wasm-pack`). The desktop app also needs the system webview's
+development libraries on Linux — on Ubuntu, `libwebkit2gtk-4.1-dev
+build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev
+librsvg2-dev` — and a display to open its window. Windows has WebView2 and
+macOS WebKit already.
 
 ## Scope discipline
 
@@ -211,6 +225,13 @@ wasm cost 53 KB gzipped and nine crates, which is why tiny-skia is built
 without its `png-format` feature. A native shell encodes with the `png`
 crate. This is not a style preference: IndexedDB is async and `std::fs`
 is sync, and a core that assumes either one cannot run on the other platform.
+
+v0.4 tested the rule: the desktop app runs the web build unchanged, wasm
+and all, and only `platform.ts` picks different IO — `storage.ts` and
+downloads in a browser, `desktop.ts` (the commands in
+`apps/desktop/src-tauri/src/files.rs`) in the desktop app. The core did not
+change. The desktop code is a chunk of its own, fetched only inside the
+desktop app, so the web bundle carries none of it.
 
 ### State ownership
 
@@ -379,10 +400,12 @@ the text.
   it.
 - The written copy drops detached nodes (`purge_unreachable` on a clone); the
   live document keeps them because undo needs them.
-- On the web the project lives in IndexedDB (`storage.ts`). Autosave stays off
-  until the stored project has been read back, and for the whole session if
-  it could not be loaded, so an empty document never overwrites a project this
-  build failed to open.
+- On the web the project lives in IndexedDB (`storage.ts`); in the desktop
+  app, in `autosave.json` in the app's data folder, written whole or not at
+  all (a temporary file renamed over it). Autosave stays off until the stored
+  project has been read back, and for the whole session if it could not be
+  loaded, so an empty document never overwrites a project this build failed
+  to open.
 
 ## Repo layout
 
@@ -405,21 +428,28 @@ graphicgene/
 │   ├── graphicgene-render/ # incremental RenderScene, Renderer trait, CPU renderer
 │   └── graphicgene-wasm/   # thin wasm-bindgen shell over the session
 └── apps/
-    └── web/
-        ├── src/
-        │   ├── components/ui/   # vendored shadcn — edit freely, that is the point
-        │   ├── editor.ts        # the only file that touches wasm
-        │   └── styles.css       # Tailwind theme + density tokens
-        └── scripts/             # smoke.mjs (wasm boundary), ui.mjs (React in jsdom),
-                                 # bench.mjs (per-frame costs)
+    ├── web/
+    │   ├── src/
+    │   │   ├── components/ui/   # vendored shadcn — edit freely, that is the point
+    │   │   ├── editor.ts        # the only file that touches wasm
+    │   │   ├── platform.ts      # browser or desktop: where files go
+    │   │   └── styles.css       # Tailwind theme + density tokens
+    │   └── scripts/             # smoke.mjs (wasm boundary), ui.mjs (React in jsdom),
+    │                            # bench.mjs (per-frame costs)
+    └── desktop/
+        └── src-tauri/           # the Tauri shell: its own Cargo workspace,
+                                 # excluded from the root one (it needs the
+                                 # system webview's libraries to build)
 ```
 
 `graphicgene-core` stays dependency-light (`kurbo`, `slotmap`, `serde`,
 `thiserror`, and `ttf-parser` for text); heavy rendering dependencies stay
 in `graphicgene-render`.
 
-`apps/desktop` (Tauri) and `packages/ui` are created when they are built, not
-before. The crate prefix matches gamegene's `gamegene-*` convention — `gg-` is
+`apps/desktop` is the Tauri shell (v0.4). It is excluded from the root Cargo
+workspace so that the core, the wasm build and CI's checks never need GTK or
+WebKit; it has its own `Cargo.lock` and `target/`. `packages/ui` is created
+when it is built, not before. The crate prefix matches gamegene's `gamegene-*` convention — `gg-` is
 ambiguous between the two projects.
 
 ## Performance rules
@@ -523,6 +553,14 @@ The one deliberate exception is dev-only: `jsdom` and `fake-indexeddb` (about
 30 packages) run `pnpm ui`, the only check of the React layer in CI. None of
 it ships. Revisit if a lighter DOM ever covers what `ui.mjs` needs.
 
+The desktop app adds Tauri: `tauri` and `tauri-plugin-dialog` in its own
+Cargo workspace — about 430 crates in its lockfile, against the core's
+handful, which is one more reason it stays out of the root workspace — `@tauri-apps/cli` to build it, and `@tauri-apps/api` in the
+web app — only `invoke`, in the chunk the desktop app alone fetches. The
+page's file access is four commands of our own (`files.rs`) rather than
+Tauri's fs plugin, so it can write only where the user picked in a dialog,
+and the autosave.
+
 ## Conventions
 
 - Package manager: pnpm only (no npm/yarn).
@@ -537,7 +575,10 @@ it ships. Revisit if a lighter DOM ever covers what `ui.mjs` needs.
 
 Each milestone is an annotated tag, `vX.Y.0`, on the commit that completes
 it, and the workspace `version` in `Cargo.toml` moves to match in that
-commit. A fix after a tag is a patch tag (`vX.Y.1`). Tags do not deploy —
+commit — and so does `apps/desktop/src-tauri/Cargo.toml`'s, which the
+desktop app reports as its own. Pushing a version tag runs the Desktop
+workflow, which drafts a GitHub release with the Windows, macOS and Linux
+installers; Roger publishes it. A fix after a tag is a patch tag (`vX.Y.1`). Tags do not deploy —
 Pages deploys from `main` — so pushing an old tag is safe. `v0.1.0` is
 `6a4f6e5`, the last commit before v0.2 work began.
 
@@ -545,6 +586,10 @@ Pages deploys from `main` — so pushing an old tag is safe. `v0.1.0` is
 
 - GitHub Actions: fmt, clippy, tests -> `wasm-pack build --release` -> smoke
   -> ui -> pnpm build -> GitHub Pages.
+- The Desktop workflow (`desktop.yml`) builds the installers on Windows,
+  macOS and Linux — on tags, and on pushes to `main` that touch
+  `apps/desktop`. The installers are not code-signed, so SmartScreen and
+  Gatekeeper warn before the first run.
 - Runners are pinned (`ubuntu-24.04`), not `ubuntu-latest`: a new image is a
   major version like any other, adopted by a commit once CI passes on it.
 - Actions stay on majors that run on a current Node (24 as of 2026-09). When

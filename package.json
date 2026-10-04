@@ -6,6 +6,8 @@
     "build:wasm": "wasm-pack build crates/graphicgene-wasm --release --target web --out-dir ../../apps/web/src/wasm",
     "dev": "pnpm build:wasm && pnpm --filter @graphicgene/web dev",
     "build": "pnpm build:wasm && pnpm --filter @graphicgene/web build",
+    "desktop": "pnpm --filter @graphicgene/desktop dev",
+    "build:desktop": "pnpm --filter @graphicgene/desktop build",
     "test": "cargo test --workspace",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings",
     "smoke": "pnpm build:wasm && pnpm --filter @graphicgene/web smoke",

@@ -18,6 +18,8 @@ import { MOD, SHIFT } from "@/shortcuts";
 import { ThemeMenu } from "@/ThemeMenu";
 
 type Props = {
+  /** In the desktop app, files are saved where the user picks; in a browser, downloaded. */
+  desktop: boolean;
   onOpen: () => void;
   onDownload: () => void;
   onExportSvg: () => void;
@@ -28,7 +30,7 @@ type Props = {
 /** PNG scales offered, as in every design tool's export menu. */
 const PNG_SCALES = [1, 2, 3];
 
-export function Header({ onOpen, onDownload, onExportSvg, onExportPng }: Props) {
+export function Header({ desktop, onOpen, onDownload, onExportSvg, onExportPng }: Props) {
   // A per-viewer choice, like the theme: not part of the document.
   const [transparent, setTransparent] = useState(false);
   return (
@@ -46,7 +48,11 @@ export function Header({ onOpen, onDownload, onExportSvg, onExportPng }: Props) 
           onClick={onOpen}
           shortcut={[MOD, "O"]}
         />
-        <IconButton label="Download project file" icon={<FileDown />} onClick={onDownload} />
+        <IconButton
+          label={desktop ? "Save project file as…" : "Download project file"}
+          icon={<FileDown />}
+          onClick={onDownload}
+        />
         <Separator orientation="vertical" className="mx-1.5 !h-4" />
         {/* The one primary action in the chrome: getting the artwork out. */}
         <DropdownMenu>
@@ -61,7 +67,7 @@ export function Header({ onOpen, onDownload, onExportSvg, onExportPng }: Props) 
               </DropdownMenuTrigger>
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={6}>
-              Download the artwork as SVG or PNG
+              {desktop ? "Save the artwork as SVG or PNG" : "Download the artwork as SVG or PNG"}
             </TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="min-w-52">

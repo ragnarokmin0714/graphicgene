@@ -4,15 +4,15 @@ import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SWATCHES } from "@/color";
 import type { EditorMode, Tool } from "@/editor";
-import { download, encodePng } from "@/files";
+import { encodePng } from "@/files";
 import { loadBaseFonts, loadMissingFonts } from "@/fonts";
 import { Header } from "@/Header";
 import { type LayerActions, LayerPanel } from "@/LayerPanel";
+import { detectPlatform, type OpenedFile, type Platform } from "@/platform";
 import { type PropertyActions, PropertiesPanel } from "@/PropertiesPanel";
 import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
 import { StatusBar, type ZoomActions } from "@/StatusBar";
-import { readProject, writeProject } from "@/storage";
 import { ToolDock } from "@/ToolDock";
 import { useEditor } from "@/useEditor";
 
@@ -63,8 +63,10 @@ function hintFor(tool: Tool, mode: EditorMode | null): string | null {
  * status-bar message about the last save or load.
  *
  * Persistence is app-layer IO: the core hands over JSON, and this component
- * autosaves it to IndexedDB after each pause in editing, restores it on the
- * next visit, and moves project and SVG files in and out of the browser.
+ * autosaves it after each pause in editing, restores it on the next visit,
+ * and moves project files and exports in and out. Where they go is the
+ * platform's business (`platform.ts`): IndexedDB and downloads in a
+ * browser, files and the system's dialogs in the desktop app.
  */
 export function App() {
   const { editor, revision, error, clearError, run, ready } = useEditor(
@@ -72,6 +74,8 @@ export function App() {
     NEW_ARTBOARD.height,
   );
   const [notice, setNotice] = useState<string | null>(null);
+  /** Null until known; nothing is read or written before then. */
+  const [platform, setPlatform] = useState<Platform | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   /**
    * Autosave stays off until the stored project has been read back — or
@@ -162,18 +166,28 @@ export function App() {
   const undo = () => run((editor) => editor.undo());
   const redo = () => run((editor) => editor.redo());
 
-  /** Write the project to IndexedDB unless unchanged; `force` reports even then. */
+  useEffect(() => {
+    let live = true;
+    detectPlatform()
+      .then((found) => live && setPlatform(found))
+      .catch(() => live && setNotice("Could not start the app's file storage"));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /** Write the autosave unless unchanged; `force` reports even then. */
   const save = async (force = false) => {
     const core = editor.current;
-    if (!core || !restored.current || core.busy) return;
+    if (!core || !platform || !restored.current || core.busy) return;
     const json = core.toJson();
     if (json === lastSaved.current && !force) return;
     try {
-      await writeProject(json);
+      await platform.writeProject(json);
       lastSaved.current = json;
       setNotice(`Saved ${timeFormat.format(new Date())}`);
     } catch {
-      setNotice("Could not save in this browser");
+      setNotice(platform.desktop ? "Could not write the autosave file" : "Could not save in this browser");
     }
   };
 
@@ -193,11 +207,12 @@ export function App() {
     void loadMissingFonts(core).then((added) => added && run(() => {}));
   });
 
-  // Restore the last session once the core is up.
+  // Restore the last session once the core is up and the storage is known.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !platform) return;
     let cancelled = false;
-    readProject()
+    platform
+      .readProject()
       .then((text) => {
         if (cancelled) return;
         if (text) {
@@ -215,12 +230,14 @@ export function App() {
         restored.current = true;
       })
       .catch(() => {
-        if (!cancelled) setNotice("Autosave is unavailable in this browser");
+        if (!cancelled) {
+          setNotice(platform.desktop ? "Autosave paused: the autosave file could not be read" : "Autosave is unavailable in this browser");
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [ready, run]);
+  }, [ready, run, platform]);
 
   // Autosave after each pause in editing. A press in progress is skipped;
   // its release bumps the revision and schedules another try.
@@ -240,28 +257,54 @@ export function App() {
     return () => document.removeEventListener("visibilitychange", onHide);
   });
 
-  const openFile = async (file: File) => {
-    const text = await file.text();
+  const loadOpened = ({ name, text }: OpenedFile) => {
     const opened = run((editor) => {
       editor.loadJson(text);
       return true;
     });
-    if (opened) setNotice(`Opened ${file.name}`);
+    if (opened) setNotice(`Opened ${name}`);
   };
 
-  const downloadProject = () =>
-    run((editor) => download(PROJECT_FILE, editor.toJson(), "application/json"));
+  const openFile = async (file: File) => loadOpened({ name: file.name, text: await file.text() });
 
-  const exportSvg = () =>
-    run((editor) => download(SVG_FILE, editor.exportSvg(), "image/svg+xml"));
+  /** The desktop's open dialog, or the page's file input in a browser. */
+  const open = () => {
+    if (!platform?.openProject) {
+      fileInput.current?.click();
+      return;
+    }
+    platform
+      .openProject()
+      .then((file) => file && loadOpened(file))
+      .catch(() => setNotice("Could not open the file"));
+  };
+
+  /** A download in a browser; the save dialog on the desktop, which reports where it went. */
+  const deliver = (name: string, data: string | Blob, type: string) => {
+    if (!platform) return;
+    platform
+      .saveFile(name, data, type)
+      .then((saved) => saved && platform.desktop && setNotice(`Saved ${saved}`))
+      .catch(() => setNotice(`Could not save ${name}`));
+  };
+
+  const downloadProject = () => {
+    const json = run((editor) => editor.toJson());
+    if (json !== undefined) deliver(PROJECT_FILE, json, "application/json");
+  };
+
+  const exportSvg = () => {
+    const svg = run((editor) => editor.exportSvg());
+    if (svg !== undefined) deliver(SVG_FILE, svg, "image/svg+xml");
+  };
 
   const exportPng = (scale: number, transparent: boolean) => {
     const image = run((editor) => editor.exportImage(scale, transparent));
     if (!image) return;
     const filename = scale === 1 ? PNG_FILE : PNG_FILE.replace(".png", `@${scale}x.png`);
     encodePng(image)
-      .then((png) => download(filename, png, "image/png"))
-      .catch(() => setNotice("Could not encode a PNG in this browser"));
+      .then((png) => deliver(filename, png, "image/png"))
+      .catch(() => setNotice("Could not encode a PNG"));
   };
 
   /** Switching tools finishes a pen path or point editing in progress. */
@@ -324,7 +367,7 @@ export function App() {
     { key: "-", mod: true, run: zoomActions.zoomOut },
     { key: "0", mod: true, run: zoomActions.zoomTo100 },
     { code: "Digit1", shift: true, run: zoomActions.zoomToFit },
-    { key: "o", mod: true, run: () => fileInput.current?.click() },
+    { key: "o", mod: true, run: open },
     { key: "e", mod: true, shift: true, run: exportSvg },
     ...arrows,
   ]);
@@ -333,7 +376,8 @@ export function App() {
     <TooltipProvider delayDuration={400}>
       <div className="flex h-full flex-col">
         <Header
-          onOpen={() => fileInput.current?.click()}
+          desktop={platform?.desktop ?? false}
+          onOpen={open}
           onDownload={downloadProject}
           onExportSvg={exportSvg}
           onExportPng={exportPng}

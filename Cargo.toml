@@ -5,6 +5,9 @@ members = [
     "crates/graphicgene-render",
     "crates/graphicgene-wasm",
 ]
+# The desktop shell is its own workspace: it needs the system webview's
+# libraries to build, which the core, the wasm build and CI's checks must not.
+exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.3.0"

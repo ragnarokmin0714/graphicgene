@@ -97,6 +97,9 @@ URL.revokeObjectURL = () => {};
 window.HTMLAnchorElement.prototype.click = function () {
   downloads.at(-1).filename = this.download;
 };
+// What the desktop shell was asked to save, when the App runs as the
+// desktop app (the "Desktop app" section).
+const shellSaves = [];
 
 // The canvas: a 2D context whose putImageData copies into a "screen" buffer,
 // cleared whenever the element changes size, as a real one is, and whose
@@ -339,6 +342,12 @@ try {
   const anchorMarks = () => [...surface().querySelectorAll('svg rect[width="7"]')];
 
   const downloadProject = async () => {
+    // In the desktop app the same button saves through the shell instead.
+    if (globalThis.isTauri) {
+      await press(button("Save project file as…"));
+      await wait(10);
+      return new TextDecoder().decode(shellSaves.at(-1));
+    }
     await press(button("Download project file"));
     return downloads.at(-1).text();
   };
@@ -947,6 +956,101 @@ try {
   await press(document.querySelector('[role="alert"] button'));
   check(!document.querySelector('[role="alert"]'), "the error can be dismissed");
   await act(async () => root.unmount());
+
+  section("Desktop app");
+  // The same App inside the desktop shell: Tauri marks the page and bridges
+  // `invoke` to the Rust commands in apps/desktop. This stands in for those
+  // commands — a file on disk and the system's dialogs — and records calls.
+  const calls = [];
+  const disk = { autosave: project, open: null, saveAs: (name) => name };
+  const decoder = new TextDecoder();
+  window.__TAURI_INTERNALS__ = {
+    invoke: async (cmd, args, options) => {
+      calls.push({ cmd, args, options });
+      switch (cmd) {
+        case "read_autosave":
+          return disk.autosave;
+        case "write_autosave":
+          disk.autosave = args.json;
+          return null;
+        case "open_project":
+          return disk.open;
+        case "save_file":
+          shellSaves.push(args);
+          return disk.saveAs(decodeURIComponent(options.headers["x-file-name"]));
+        default:
+          throw new Error(`no command ${cmd}`);
+      }
+    },
+  };
+  globalThis.isTauri = true;
+  const called = (cmd) => calls.filter((call) => call.cmd === cmd);
+  const downloadsBefore = downloads.length;
+
+  root = await mount(App, () => status().includes("Restored"));
+  place();
+  check(called("read_autosave").length === 1, "restoring reads the autosave file, not IndexedDB");
+  check(layerCount() === savedLayers, `and brings back its layers (${layerCount()} of ${savedLayers})`);
+  check(
+    !!button("Save project file as…") && !button("Download project file"),
+    "the header saves rather than downloads",
+  );
+
+  await press(button("Save project file as…"));
+  await wait(20);
+  const saved = called("save_file").at(-1);
+  check(
+    decodeURIComponent(saved.options.headers["x-file-name"]) === "graphicgene-project.json",
+    "saving suggests the project file's name",
+  );
+  check(
+    saved.args instanceof Uint8Array && JSON.parse(decoder.decode(saved.args)).version === 2,
+    "and sends the project as raw bytes",
+  );
+  check(status().includes("Saved graphicgene-project.json"), `the status bar says where it went (${status()})`);
+
+  disk.saveAs = () => null;
+  const beforeCancel = status();
+  await press(button("Save project file as…"));
+  await wait(20);
+  check(status() === beforeCancel, "cancelling the save dialog changes nothing");
+
+  await exportAs("SVG");
+  await wait(20);
+  const svgCall = called("save_file").at(-1);
+  check(
+    decodeURIComponent(svgCall.options.headers["x-file-name"]) === "graphicgene.svg" &&
+      decoder.decode(svgCall.args).startsWith("<svg"),
+    "SVG export goes through the save dialog too",
+  );
+  check(downloads.length === downloadsBefore, "and nothing is downloaded the browser's way");
+
+  const autosavedBefore = disk.autosave;
+  await key("r");
+  await drag([600, 450], [660, 500]);
+  await wait(1000);
+  check(
+    called("write_autosave").length > 0 && disk.autosave !== autosavedBefore,
+    "an edit autosaves to the file",
+  );
+  check(/Saved \d/.test(status()), `and reports it (${status()})`);
+
+  disk.open = { name: "small.json", text: JSON.stringify(small) };
+  await press(button("Open project file"));
+  await wait(50);
+  check(called("open_project").length === 1, "opening asks the desktop's dialog");
+  check(status().includes("Opened small.json") && status().includes("320 × 200 px"), "and loads what it picked");
+
+  disk.open = null;
+  const beforeOpenCancel = status();
+  await press(button("Open project file"));
+  await wait(50);
+  check(status() === beforeOpenCancel && !document.querySelector('[role="alert"]'), "cancelling it changes nothing");
+  await checkScreen("in the desktop app");
+
+  await act(async () => root.unmount());
+  delete globalThis.isTauri;
+  delete window.__TAURI_INTERNALS__;
 } finally {
   await server.close();
 }
