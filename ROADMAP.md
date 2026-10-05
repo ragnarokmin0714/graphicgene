@@ -41,7 +41,7 @@ v0.3 shapes simply with `ttf-parser` — cmap, advances, pair kerning — at
 41 KB. Fonts are Noto Sans TC and Inter from Fontsource, fetched slice by
 slice as the text needs them; the core says what is missing.
 
-## v0.4 — desktop · step 1 built
+## v0.4 — desktop · step 1 done, `v0.4.0`
 
 The test of the architecture, in two steps:
 
