@@ -36,7 +36,7 @@ them.
 | Properties panel | Type a value and press `Enter`; `↑` `↓` step it (`Shift` for 10); drag a field's label sideways to scrub; `Esc` puts back what was being typed or scrubbed |
 | Colour swatch | Opens a picker: drag in the square or along the hue and opacity strips, or pick a preset |
 | Layers panel | Double-click a name to rename it; the eye and lock on a row hide and lock it; drag rows to reorder, onto the middle of a group to put them inside; right-click for more |
-| `Ctrl/⌘ C` `X` `V`, `Ctrl/⌘ D` | Copy, cut, paste — in place, into this document or another tab's — and duplicate |
+| `Ctrl/⌘ C` `X` `V`, `Ctrl/⌘ D` or `J` | Copy, cut, paste — in place, into this document or another tab's — and duplicate |
 | `Ctrl/⌘ G`, `Ctrl/⌘ Shift G` | Group, ungroup |
 | `Ctrl/⌘ ]` `[`, with `Shift` | Bring forward, send backward — with `Shift`, to the front or back |
 | `Ctrl/⌘ Shift H`, `Ctrl/⌘ Shift L` | Hide or show, lock or unlock the selection |

@@ -44,7 +44,7 @@ What is next, and the known architectural debt, is in `ROADMAP.md`.
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 200
+- `pnpm ui` — the React app driven in jsdom against the real core: 201
   checks, including zoom and pan, the properties panel and its colour
   picker, the layer panel's rename, toggles and drag to reorder, the
   clipboard, the desktop app's storage through a stand-in for its Rust

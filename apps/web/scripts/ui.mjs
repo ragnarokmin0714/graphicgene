@@ -826,6 +826,14 @@ try {
   await key("d", { ctrlKey: true });
   check(layerCount() === countBefore + 1 && rowNames(2) === "Alpha,Alpha", "Ctrl+D duplicates in place");
   await key("z", { ctrlKey: true });
+  await clickRow("Alpha");
+  await key("j", { ctrlKey: true });
+  const selectedRows = () => layerRows().filter((li) => li.querySelector("[data-selected]") || li.hasAttribute("data-selected"));
+  check(
+    layerCount() === countBefore + 1 && rowNames(2) === "Alpha,Alpha" && selectedRows().length === 1 && selectedRows()[0] === layerRows()[0],
+    "Ctrl+J, Photoshop's binding, does the same and selects the copy",
+  );
+  await key("z", { ctrlKey: true });
 
   await clickRow("Alpha");
   const cut = clipboardEvent("cut");

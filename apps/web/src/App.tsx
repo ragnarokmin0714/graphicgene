@@ -347,6 +347,8 @@ export function App() {
     { key: "backspace", run: () => run((editor) => editor.deleteSelection()) },
     { key: "a", mod: true, run: () => run((editor) => editor.selectAll()) },
     { key: "d", mod: true, run: layerActions.duplicate },
+    // Photoshop's binding for the same thing.
+    { key: "j", mod: true, run: layerActions.duplicate },
     { key: "g", mod: true, run: layerActions.group },
     { key: "g", mod: true, shift: true, run: layerActions.ungroup },
     // By position, not character: Shift turns "]" into "}" on most layouts.
