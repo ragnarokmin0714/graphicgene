@@ -13,7 +13,8 @@ them.
 > **Status: v0.4 preview.** Draw rectangles, ellipses, bezier paths and
 > text — Chinese included; select, move, scale and rotate them; edit any path point by
 > point; set position, size, rotation, opacity, fill and stroke in a
-> properties panel; rename, hide, lock, reorder and group layers; copy,
+> properties panel; align and distribute them; rename, hide, lock,
+> reorder and group layers; copy,
 > paste and duplicate; zoom and pan, sharp on HiDPI screens; undo
 > everything.
 > Work autosaves in the browser, project files can be downloaded and
@@ -33,7 +34,7 @@ them.
 | Double-click a path | Edit its points: drag points and handles, click a segment to add a point, double-click a point for corner/curve; `Esc`, `Enter` or a click away from the path to finish |
 | Handles on a selection | Scale (`Shift` keeps proportions, `Alt` from the centre); just outside a corner rotates (`Shift` snaps to 15°) |
 | Arrow keys | Nudge 1px, 10px with `Shift` |
-| Properties panel | Type a value and press `Enter`; `↑` `↓` step it (`Shift` for 10); drag a field's label sideways to scrub; `Esc` puts back what was being typed or scrubbed |
+| Properties panel | The buttons at the top align the selection — several layers with each other, one with the artboard — or space three or more out evenly. Type a value and press `Enter`; `↑` `↓` step it (`Shift` for 10); drag a field's label sideways to scrub; `Esc` puts back what was being typed or scrubbed |
 | Colour swatch | Opens a picker: drag in the square or along the hue and opacity strips, or pick a preset |
 | Layers panel | Double-click a name to rename it; the eye and lock on a row hide and lock it; drag rows to reorder, onto the middle of a group to put them inside; right-click for more |
 | `Ctrl/⌘ C` `X` `V`, `Ctrl/⌘ D` or `J` | Copy, cut, paste — in place, into this document or another tab's — and duplicate |

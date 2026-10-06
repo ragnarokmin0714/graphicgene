@@ -8,6 +8,7 @@
 //! 2. **No browser or OS APIs.** Platform differences go behind traits that the
 //!    app layer implements.
 
+pub mod align;
 pub mod anchors;
 pub mod clipboard;
 pub mod color;

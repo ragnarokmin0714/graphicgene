@@ -23,6 +23,7 @@ mod tools;
 
 use std::fmt;
 
+use crate::align::{self, Align, Distribute};
 use crate::clipboard;
 use crate::color::LinearRgba;
 use crate::command::{Command, Journal};
@@ -868,6 +869,22 @@ impl Session {
     pub fn arrange(&mut self, arrange: Arrange) -> Result<bool> {
         self.end_interaction()?;
         let command = layers::arrange_command(&self.document, self.selection.ids(), arrange)?;
+        self.execute_some(command)
+    }
+
+    /// Line the selection up by an edge or centre: with each other, or one
+    /// node with the artboard. One undo step; false if nothing moved.
+    pub fn align_selection(&mut self, how: Align) -> Result<bool> {
+        self.end_interaction()?;
+        let command = align::align_command(&self.document, self.selection.ids(), how)?;
+        self.execute_some(command)
+    }
+
+    /// Space three or more selected nodes evenly. One undo step; false if
+    /// nothing moved.
+    pub fn distribute_selection(&mut self, axis: Distribute) -> Result<bool> {
+        self.end_interaction()?;
+        let command = align::distribute_command(&self.document, self.selection.ids(), axis)?;
         self.execute_some(command)
     }
 

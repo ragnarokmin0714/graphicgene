@@ -39,13 +39,13 @@ What is next, and the known architectural debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 138 tests, including a randomized check that
+- `cargo test --workspace` — 144 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 201
+- `pnpm ui` — the React app driven in jsdom against the real core: 210
   checks, including zoom and pan, the properties panel and its colour
   picker, the layer panel's rename, toggles and drag to reorder, the
   clipboard, the desktop app's storage through a stand-in for its Rust
@@ -418,7 +418,7 @@ demands them, not in advance.
 The core modules in the order data flows: `doc` (arena + change log),
 `command` (journal), `session` (the rules), then what the session drives —
 `selection`, `hit`, `gesture`, `anchors`, `pen`, `path_edit`, `properties`,
-`layers`, `clipboard` — then `fonts` and `text`, and the outputs: `layout`,
+`layers`, `align`, `clipboard` — then `fonts` and `text`, and the outputs: `layout`,
 `svg`, `project`. `testing` (behind a feature, for tests only) builds a font
 in code.
 

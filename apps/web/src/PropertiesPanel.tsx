@@ -1,5 +1,13 @@
 import {
   ALargeSmall,
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalDistributeCenter,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalDistributeCenter,
   Blend,
   ChevronDown,
   Minus,
@@ -21,8 +29,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ColorPicker } from "@/ColorPicker";
 import { isRgba } from "@/color";
-import type { Mixed, Properties, PropertyChange, Rgba, TextAlign } from "@/editor";
+import type { Alignment, Axis, Mixed, Properties, PropertyChange, Rgba, TextAlign } from "@/editor";
 import { FIELD, HexField, NumberField } from "@/fields";
+import { IconButton } from "@/IconButton";
 import { FAMILY_NAMES } from "@/fonts";
 
 export type PropertyActions = {
@@ -36,10 +45,26 @@ export type PropertyActions = {
   onSet: (change: PropertyChange) => void;
 };
 
-type Props = PropertyActions & {
-  /** From the core, identity-stable while unchanged; null with nothing selected. */
-  properties: Properties | null;
+export type ArrangeActions = {
+  onAlign: (how: Alignment) => void;
+  onDistribute: (axis: Axis) => void;
 };
+
+type Props = PropertyActions &
+  ArrangeActions & {
+    /** From the core, identity-stable while unchanged; null with nothing selected. */
+    properties: Properties | null;
+  };
+
+/** The align buttons, in the order design tools lay them out. */
+const ALIGN_BUTTONS: { how: Alignment; label: string; icon: React.ReactNode }[] = [
+  { how: "left", label: "Align left", icon: <AlignStartVertical /> },
+  { how: "center-x", label: "Align horizontal centres", icon: <AlignCenterVertical /> },
+  { how: "right", label: "Align right", icon: <AlignEndVertical /> },
+  { how: "top", label: "Align top", icon: <AlignStartHorizontal /> },
+  { how: "center-y", label: "Align vertical centres", icon: <AlignCenterHorizontal /> },
+  { how: "bottom", label: "Align bottom", icon: <AlignEndHorizontal /> },
+];
 
 /** What a new fill or stroke starts as: Figma's grey fill, a black hairline. */
 const NEW_FILL: Rgba = [217, 217, 217, 255];
@@ -72,7 +97,15 @@ export const PropertiesPanel = memo(function PropertiesPanel({ properties, ...ac
   );
 });
 
-function Sections({ properties: p, onPreview, onCommit, onCancel, onSet }: Props & { properties: Properties }) {
+function Sections({
+  properties: p,
+  onPreview,
+  onCommit,
+  onCancel,
+  onSet,
+  onAlign,
+  onDistribute,
+}: Props & { properties: Properties }) {
   /** The four callbacks a field needs, for one property. */
   const field = <T,>(change: (value: T) => PropertyChange) => ({
     onPreview: (value: T) => onPreview(change(value)),
@@ -83,6 +116,28 @@ function Sections({ properties: p, onPreview, onCommit, onCancel, onSet }: Props
 
   return (
     <div className="flex-1 overflow-y-auto pb-3">
+      {/* One layer aligns to the artboard, several to their combined box. */}
+      <Section title={p.count > 1 ? "Align" : "Align to artboard"}>
+        <div className="flex items-center gap-0.5">
+          {ALIGN_BUTTONS.map(({ how, label, icon }) => (
+            <IconButton key={how} label={label} icon={icon} onClick={() => onAlign(how)} />
+          ))}
+          <span className="bg-border mx-1 h-4 w-px" />
+          <IconButton
+            label="Distribute horizontal spacing"
+            icon={<AlignHorizontalDistributeCenter />}
+            disabled={p.count < 3}
+            onClick={() => onDistribute("horizontal")}
+          />
+          <IconButton
+            label="Distribute vertical spacing"
+            icon={<AlignVerticalDistributeCenter />}
+            disabled={p.count < 3}
+            onClick={() => onDistribute("vertical")}
+          />
+        </div>
+      </Section>
+
       <Section title="Position">
         <div className="grid grid-cols-2 gap-1.5">
           <NumberField name="X" label="X" value={p.x} {...field((x: number) => ({ x }))} />

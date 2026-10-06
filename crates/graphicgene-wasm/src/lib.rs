@@ -21,6 +21,7 @@
 //! says where; the page reads those parts in place from wasm memory through
 //! `pixelsPtr`.
 
+use graphicgene_core::align::{Align, Distribute};
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::Command;
 use graphicgene_core::geom::{Affine, BezPath, Ellipse, Point, Rect, Shape, Size, Vec2};
@@ -499,6 +500,35 @@ impl Editor {
             _ => return Err(JsError::new("arrange forward, backward, front or back")),
         };
         self.session.arrange(arrange).map_err(to_js)
+    }
+
+    /// "left", "center-x", "right", "top", "center-y" or "bottom": line the
+    /// selection up with itself, or one node with the artboard.
+    pub fn align(&mut self, how: &str) -> Result<bool, JsError> {
+        let align = match how {
+            "left" => Align::Left,
+            "center-x" => Align::CenterX,
+            "right" => Align::Right,
+            "top" => Align::Top,
+            "center-y" => Align::CenterY,
+            "bottom" => Align::Bottom,
+            _ => {
+                return Err(JsError::new(
+                    "align left, center-x, right, top, center-y or bottom",
+                ));
+            }
+        };
+        self.session.align_selection(align).map_err(to_js)
+    }
+
+    /// "horizontal" or "vertical": even gaps between three or more nodes.
+    pub fn distribute(&mut self, axis: &str) -> Result<bool, JsError> {
+        let axis = match axis {
+            "horizontal" => Distribute::Horizontal,
+            "vertical" => Distribute::Vertical,
+            _ => return Err(JsError::new("distribute horizontal or vertical")),
+        };
+        self.session.distribute_selection(axis).map_err(to_js)
     }
 
     /// Put the selection in a new group, which becomes the selection.

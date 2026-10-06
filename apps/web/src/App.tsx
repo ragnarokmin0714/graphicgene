@@ -9,7 +9,7 @@ import { loadBaseFonts, loadMissingFonts } from "@/fonts";
 import { Header } from "@/Header";
 import { type LayerActions, LayerPanel } from "@/LayerPanel";
 import { detectPlatform, type OpenedFile, type Platform } from "@/platform";
-import { type PropertyActions, PropertiesPanel } from "@/PropertiesPanel";
+import { type ArrangeActions, type PropertyActions, PropertiesPanel } from "@/PropertiesPanel";
 import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
 import { StatusBar, type ZoomActions } from "@/StatusBar";
@@ -159,6 +159,14 @@ export function App() {
       onCommit: () => run((editor) => editor.commitProperty()),
       onCancel: () => run((editor) => editor.cancelProperty()),
       onSet: (change) => run((editor) => editor.setProperty(change)),
+    }),
+    [run],
+  );
+
+  const arrangeActions: ArrangeActions = useMemo(
+    () => ({
+      onAlign: (how) => run((editor) => editor.align(how)),
+      onDistribute: (axis) => run((editor) => editor.distribute(axis)),
     }),
     [run],
   );
@@ -429,7 +437,7 @@ export function App() {
               canRedo={core?.canRedo ?? false}
             />
           </section>
-          <PropertiesPanel properties={properties} {...propertyActions} />
+          <PropertiesPanel properties={properties} {...propertyActions} {...arrangeActions} />
         </main>
 
         <StatusBar

@@ -175,6 +175,9 @@ export type DropPlace = "above" | "below" | "inside";
 
 /** A step through the stacking order. */
 export type Arrangement = "forward" | "backward" | "front" | "back";
+/** Which edge or centre line `align` brings into line. */
+export type Alignment = "left" | "center-x" | "right" | "top" | "center-y" | "bottom";
+export type Axis = "horizontal" | "vertical";
 
 /** An area of the canvas: x, y, width, height, in device pixels. */
 export type PixelRect = readonly [number, number, number, number];
@@ -504,6 +507,16 @@ export class EditorHandle {
 
   arrange(how: Arrangement): boolean {
     return this.inner.arrange(how);
+  }
+
+  /** Line the selection up with itself, or one node with the artboard: one undo step. */
+  align(how: Alignment): boolean {
+    return this.inner.align(how);
+  }
+
+  /** Even gaps between three or more selected nodes: one undo step. */
+  distribute(axis: Axis): boolean {
+    return this.inner.distribute(axis);
   }
 
   /** Put the selection in a new group, which becomes the selection. */

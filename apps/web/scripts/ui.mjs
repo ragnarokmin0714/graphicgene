@@ -707,6 +707,35 @@ try {
   check(status().includes("1 selected"), "without deselecting");
   await checkScreen("after the colour picker");
 
+  section("Align");
+  const layersBeforeAlign = layerCount();
+  await key("Escape");
+  await key("r");
+  await drag([620, 450], [660, 470]);
+  await key("r");
+  await drag([700, 500], [760, 540]);
+  check(panel().textContent.includes("Align to artboard"), "one layer aligns to the artboard");
+  await click(640, 460, { shiftKey: true });
+  const alignTitle = () => [...panel().querySelectorAll("h3")].find((h) => h.textContent.startsWith("Align"))?.textContent;
+  check(frameOf() === "620 450 140 90" && alignTitle() === "Align", `two layers align to each other (${frameOf()})`);
+  check(button("Distribute horizontal spacing")?.disabled, "spacing out needs three");
+  await press(button("Align left"));
+  check(frameOf() === "620 450 60 90", `Align left lines up their left edges (${frameOf()})`);
+  await press(button("Align bottom"));
+  // The first moves down to the second's bottom, 540; the box now starts at the second's top.
+  check(frameOf() === "620 500 60 40", `Align bottom their bottom edges (${frameOf()})`);
+  await key("z", { ctrlKey: true });
+  check(frameOf() === "620 450 60 90", "each is one undo step");
+  // The second one alone, moved left by Align left.
+  await key("Escape");
+  await click(650, 520);
+  await press(button("Align right"));
+  check(value("X") === "740", `alone, Align right puts it at the artboard's edge (X ${value("X")})`);
+  await checkScreen("after aligning");
+  // Back to where this section started.
+  while (layerCount() > layersBeforeAlign) await key("z", { ctrlKey: true });
+  check(layerCount() === layersBeforeAlign, "undone");
+
   section("Layers panel");
   const layerRows = () => [...document.querySelectorAll('aside[aria-label="Layers"] li')];
   const rowNames = (n = 3) => layerRows().slice(0, n).map((li) => li.textContent).join(",");

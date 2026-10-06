@@ -63,6 +63,19 @@ The test of the architecture, in two steps:
    this is a new shell, not a new core. Not started: nothing needs threads
    or a GPU yet.
 
+## v0.5 — editing basics · in progress
+
+Chosen by Roger on 2026-10-06, after v0.4: what anyone reaches for once
+shapes are on the page — like v0.2, many small things rather than one big
+one.
+
+| Item | What it needs |
+|---|---|
+| ~~Align and distribute~~ | **Done 2026-10-06.** `core::align`: line the selection up by an edge or centre — several layers with each other, one with the artboard — or even out the gaps between three or more. Each layer moves by its box on the page, composed through its parent like a drag, and a group moves as one with anything selected inside it. One batch, one undo step. Buttons at the top of the properties panel. |
+| Stroke styles | Dashes, caps and joins on `Stroke`; tiny-skia draws them and SVG writes them. The project format moves to version 3 with gradients, so an older build refuses the file by its version. Miter joins reach past the stroke's half-width, which damage rects must allow for. |
+| Gradient fills | Linear and radial, with colour stops, in the box of the shape so they follow its transform. Fill becomes a paint (solid or gradient) in the model, the panel, SVG and the renderer. |
+| Snapping and smart guides | While moving and drawing, edges and centres snap to other layers' and the artboard's, with guide lines drawn over the canvas. Per-frame: candidates gathered when the drag starts, no allocation while it runs; `pnpm bench` before and after. |
+
 ## Later
 
 | Direction | What it needs |
