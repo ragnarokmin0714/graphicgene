@@ -53,7 +53,9 @@ The test of the architecture, in two steps:
    file access is four commands of our own (`apps/desktop/src-tauri/src/files.rs`),
    not Tauri's fs plugin, so it writes only where the user picked. The
    Desktop workflow builds Windows, macOS and Linux installers, and drafts
-   a release with them on a version tag. Owed: a look at the real window on
+   a release with them on a version tag — from `v0.4.1` on: `v0.4.0`'s
+   builds passed on all three systems, but its release step attached the
+   bundle folders instead of the files in them. Owed: a look at the real window on
    Windows — this box has no display, and its webview's CSP (wasm, inline
    styles) is checked only by reading it.
 2. **The core running natively**, behind Tauri commands, once threads or a

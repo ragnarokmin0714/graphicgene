@@ -88,12 +88,20 @@ jobs:
         with:
           path: installers
           merge-multiple: true
+      # Each artifact keeps its bundle folder (nsis/, dmg/, deb/) — the
+      # common root of the upload's paths — so the installers are one level
+      # down. Attaching the folders themselves failed v0.4.0's release. A
+      # draft left by a failed try is filled in rather than created again.
       - name: Draft a release with the installers
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME" installers/*
-          --repo "$GITHUB_REPOSITORY" --draft --verify-tag
-          --title "graphicgene $GITHUB_REF_NAME"
-          --notes "Desktop installers built from $GITHUB_REF_NAME. They are not code-signed:
-          Windows SmartScreen and macOS Gatekeeper warn before the first run."
+        run: |
+          files=(installers/*/*)
+          ls -l "${files[@]}"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" \
+              --draft --verify-tag --title "graphicgene $GITHUB_REF_NAME" \
+              --notes "Desktop installers built from $GITHUB_REF_NAME. They are not code-signed: Windows SmartScreen and macOS Gatekeeper warn before the first run."
+          fi
