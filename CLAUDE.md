@@ -29,8 +29,9 @@ paste and duplicate; PNG export; and canvas input routed through the
 session. v0.3, text, followed the same day and is tagged `v0.3.0`: a text
 tool typed through the browser's own text field, so Chinese input works,
 set by the core in Noto Sans TC or Inter, fonts fetched as the text needs
-them. v0.4, tagged `v0.4.0` (and `v0.4.1`, which fixed the release job
-that attaches the installers), put the same web app in a desktop window
+them. v0.4, tagged `v0.4.0` (`v0.4.1` fixed the release job that attaches
+the installers; `v0.4.2` fixed issues #1 and #2), put the same web app in a
+desktop window
 (Tauri, `apps/desktop`): only storage differs — the autosave is a file, and
 projects and exports go through the system's open and save dialogs — and
 the core did not change.
