@@ -10,10 +10,7 @@ use graphicgene_core::path_edit::PressOutcome;
 use graphicgene_core::session::{Mode, SelectOutcome, Session};
 
 const TOL: f64 = 4.0;
-const STROKE: Stroke = Stroke {
-    color: LinearRgba::BLACK,
-    width: 2.0,
-};
+const STROKE: Stroke = Stroke::solid(LinearRgba::BLACK, 2.0);
 const NONE: Modifiers = Modifiers {
     shift: false,
     alt: false,

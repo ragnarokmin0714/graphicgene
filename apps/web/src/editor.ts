@@ -54,8 +54,13 @@ export type Properties = {
   fill?: Rgba | null | Mixed;
   /** The stroke colour, as `fill`: `null` is no stroke. */
   stroke?: Rgba | null | Mixed;
-  /** Of the strokes there are; left out when nothing is stroked. */
+  /** Of the strokes there are; left out when nothing is stroked, as is the rest of their style. */
   strokeWidth?: number | Mixed;
+  strokeCap?: StrokeCap | Mixed;
+  strokeJoin?: StrokeJoin | Mixed;
+  /** Dash length and gap; 0 for a solid line. */
+  strokeDash?: number | Mixed;
+  strokeGap?: number | Mixed;
   /** What the selected text shares; left out when no text is selected. */
   text?: {
     family: string | Mixed;
@@ -78,8 +83,14 @@ export type PropertyChange =
   | { stroke: null }
   /** Recolours strokes, adding a thin one where there is none. */
   | { strokeColor: Rgba }
-  /** Re-widths the strokes there are. */
+  /** Re-widths the strokes there are; the style keys below likewise leave paths without one alone. */
   | { strokeWidth: number }
+  | { strokeCap: StrokeCap }
+  | { strokeJoin: StrokeJoin }
+  /** 0 makes the line solid; a solid line gets gaps as long as its dashes. */
+  | { strokeDash: number }
+  /** 0 makes the line solid; a solid line gets dashes as long as its gaps. */
+  | { strokeGap: number }
   | { fontFamily: string }
   | { fontSize: number }
   /** A multiple of the font size. */
@@ -175,6 +186,10 @@ export type DropPlace = "above" | "below" | "inside";
 
 /** A step through the stacking order. */
 export type Arrangement = "forward" | "backward" | "front" | "back";
+/** How a stroke's open ends are drawn; the names are SVG's. */
+export type StrokeCap = "butt" | "round" | "square";
+/** How a stroke turns a corner; the names are SVG's. */
+export type StrokeJoin = "miter" | "round" | "bevel";
 /** Which edge or centre line `align` brings into line. */
 export type Alignment = "left" | "center-x" | "right" | "top" | "center-y" | "bottom";
 export type Axis = "horizontal" | "vertical";

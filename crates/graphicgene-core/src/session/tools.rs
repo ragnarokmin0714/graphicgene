@@ -106,10 +106,7 @@ impl Session {
             }
             Route::Text
         } else if self.tool == Tool::Pen {
-            let stroke = Stroke {
-                color,
-                width: PEN_STROKE_WIDTH,
-            };
+            let stroke = Stroke::solid(color, PEN_STROKE_WIDTH);
             self.pen_press(point, modifiers.shift, at.pick_tolerance, stroke)?;
             Route::Pen
         } else if self.mode() == Some(Mode::PathEdit) && self.press_keeps_path_edit(at)? {

@@ -5,7 +5,7 @@ use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::Command;
 use graphicgene_core::geom::{Affine, Point, Rect, Shape, Vec2};
 use graphicgene_core::gesture::{Frame, TransformKind};
-use graphicgene_core::node::{Node, NodeId, Stroke};
+use graphicgene_core::node::{LineCap, LineJoin, Node, NodeId, Stroke};
 use graphicgene_core::properties::{Properties, Property, Shared};
 use graphicgene_core::session::Session;
 
@@ -291,10 +291,7 @@ fn stroke_colour_and_width_change_separately() {
     let a = rect(&mut session, 0.0, 0.0, 10.0, 10.0);
     let b = rect(&mut session, 20.0, 0.0, 10.0, 10.0);
     select(&mut session, &[a]);
-    let stroke = Stroke {
-        color: LinearRgba::BLACK,
-        width: 2.0,
-    };
+    let stroke = Stroke::solid(LinearRgba::BLACK, 2.0);
     session
         .set_property(Property::Stroke(Some(stroke)))
         .unwrap();
@@ -385,14 +382,74 @@ fn anything_else_abandons_an_open_preview() {
         .unwrap();
     assert!(!session.preview_property(Property::X(30.0)).unwrap());
     session.cancel_gesture().unwrap();
-    let stroke = Stroke {
-        color: LinearRgba::BLACK,
-        width: 1.0,
-    };
+    let stroke = Stroke::solid(LinearRgba::BLACK, 1.0);
     session
         .pen_press(Point::new(100.0, 100.0), false, 4.0, stroke)
         .unwrap();
     session.pen_release().unwrap();
     assert_eq!(session.properties().unwrap(), None);
     assert!(!session.set_property(Property::X(0.0)).unwrap());
+}
+
+#[test]
+fn stroke_style_changes_strokes_only_and_keeps_through_a_recolour() {
+    let mut session = Session::new();
+    let a = rect(&mut session, 0.0, 0.0, 10.0, 10.0);
+    let b = rect(&mut session, 20.0, 0.0, 10.0, 10.0);
+    select(&mut session, &[a]);
+    session
+        .set_property(Property::Stroke(Some(Stroke::solid(
+            LinearRgba::BLACK,
+            2.0,
+        ))))
+        .unwrap();
+    select(&mut session, &[a, b]);
+    let p = props(&session);
+    assert_eq!(p.stroke_cap, Some(Shared::Same(LineCap::Butt)));
+    assert_eq!(p.stroke_join, Some(Shared::Same(LineJoin::Miter)));
+    assert_eq!(p.stroke_dash, Some(Shared::Same(0.0)), "solid");
+
+    session
+        .set_property(Property::StrokeCap(LineCap::Round))
+        .unwrap();
+    session
+        .set_property(Property::StrokeJoin(LineJoin::Bevel))
+        .unwrap();
+    // A solid line takes gaps as long as its dashes.
+    session.set_property(Property::StrokeDash(4.0)).unwrap();
+    let p = props(&session);
+    assert_eq!(p.stroke_cap, Some(Shared::Same(LineCap::Round)));
+    assert_eq!(p.stroke_join, Some(Shared::Same(LineJoin::Bevel)));
+    assert_eq!(
+        (p.stroke_dash, p.stroke_gap),
+        (Some(Shared::Same(4.0)), Some(Shared::Same(4.0)))
+    );
+    select(&mut session, &[b]);
+    assert_eq!(
+        props(&session).stroke_dash,
+        None,
+        "the unstroked one is left alone"
+    );
+
+    // A new colour keeps the style; a gap of 0 makes the line solid again.
+    select(&mut session, &[a]);
+    session.set_property(Property::StrokeGap(1.5)).unwrap();
+    session.set_property(Property::StrokeColor(RED)).unwrap();
+    let p = props(&session);
+    assert_eq!(
+        (p.stroke_dash, p.stroke_gap),
+        (Some(Shared::Same(4.0)), Some(Shared::Same(1.5)))
+    );
+    assert_eq!(p.stroke_cap, Some(Shared::Same(LineCap::Round)));
+    session.set_property(Property::StrokeGap(0.0)).unwrap();
+    assert_eq!(props(&session).stroke_dash, Some(Shared::Same(0.0)));
+    // Nonsense counts as none.
+    session
+        .set_property(Property::StrokeDash(f64::NAN))
+        .unwrap();
+    assert_eq!(props(&session).stroke_dash, Some(Shared::Same(0.0)));
+
+    // One undo step each: back through the solid gap to the dashed line.
+    session.undo().unwrap();
+    assert_eq!(props(&session).stroke_gap, Some(Shared::Same(1.5)));
 }

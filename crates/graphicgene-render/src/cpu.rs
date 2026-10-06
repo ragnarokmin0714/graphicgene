@@ -17,13 +17,15 @@
 //! edge exactly as a full redraw draws it; the cost stays proportional to
 //! the items touched, since the rest of the scratch is never read. The
 //! scratch buffer and the path builder are reused, so a steady drag
-//! allocates nothing here once warmed up.
+//! allocates nothing here once warmed up — except a dashed stroke's pattern,
+//! which tiny-skia takes as a `Vec`.
 
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::geom::{Affine, Bounds, PathEl};
+use graphicgene_core::node::{LineCap, LineJoin};
 use tiny_skia::{
-    Color, FillRule, Paint, PathBuilder, Pixmap, PixmapMut, Rect as SkRect, Stroke as SkStroke,
-    Transform,
+    Color, FillRule, LineCap as SkLineCap, LineJoin as SkLineJoin, Paint, PathBuilder, Pixmap,
+    PixmapMut, Rect as SkRect, Stroke as SkStroke, StrokeDash, Transform,
 };
 
 use crate::RenderError;
@@ -304,6 +306,22 @@ fn draw(builder: &mut PathBuilder, item: &RenderItem, view: Affine, canvas: &mut
         paint.set_color(to_sk_color(stroke.color, item.opacity));
         let sk_stroke = SkStroke {
             width: stroke.width as f32,
+            line_cap: match stroke.cap {
+                LineCap::Butt => SkLineCap::Butt,
+                LineCap::Round => SkLineCap::Round,
+                LineCap::Square => SkLineCap::Square,
+            },
+            line_join: match stroke.join {
+                LineJoin::Miter => SkLineJoin::Miter,
+                LineJoin::Round => SkLineJoin::Round,
+                LineJoin::Bevel => SkLineJoin::Bevel,
+            },
+            // The one allocation in a draw, and only for dashed strokes:
+            // tiny-skia takes the pattern as a Vec. None for a pattern it
+            // cannot draw (no length at all), which then draws solid.
+            dash: stroke
+                .dash
+                .and_then(|d| StrokeDash::new(vec![d.length as f32, d.gap as f32], 0.0)),
             ..Default::default()
         };
         canvas.stroke_path(&path, &paint, &sk_stroke, transform, None);

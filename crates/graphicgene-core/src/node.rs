@@ -62,10 +62,68 @@ impl Default for NodeCommon {
     }
 }
 
+/// How a stroke's open ends are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LineCap {
+    /// Square, ending at the end point.
+    #[default]
+    Butt,
+    Round,
+    /// Square, reaching half the width past the end point.
+    Square,
+}
+
+/// How a stroke turns a corner.
+///
+/// A miter is cut off where it would reach past four half-widths — the
+/// limit tiny-skia and SVG both use by default — which is what the
+/// renderer's damage rects allow for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LineJoin {
+    #[default]
+    Miter,
+    Round,
+    Bevel,
+}
+
+/// A dashed stroke: `length` of line, then `gap`, repeating from the start
+/// of the path. In document units, not multiples of the width.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Dash {
+    pub length: f64,
+    pub gap: f64,
+}
+
+/// A path's outline paint. The style fields are left out of the file when
+/// they hold their defaults, so a plain stroke reads as it always did.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     pub color: LinearRgba,
     pub width: f64,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub cap: LineCap,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub join: LineJoin,
+    /// None for a solid line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dash: Option<Dash>,
+}
+
+impl Stroke {
+    /// A solid stroke with butt caps and miter joins.
+    pub const fn solid(color: LinearRgba, width: f64) -> Self {
+        Self {
+            color,
+            width,
+            cap: LineCap::Butt,
+            join: LineJoin::Miter,
+            dash: None,
+        }
+    }
+}
+
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

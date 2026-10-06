@@ -29,7 +29,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ColorPicker } from "@/ColorPicker";
 import { isRgba } from "@/color";
-import type { Alignment, Axis, Mixed, Properties, PropertyChange, Rgba, TextAlign } from "@/editor";
+import type {
+  Alignment,
+  Axis,
+  Mixed,
+  Properties,
+  PropertyChange,
+  Rgba,
+  StrokeCap,
+  StrokeJoin,
+  TextAlign,
+} from "@/editor";
 import { FIELD, HexField, NumberField } from "@/fields";
 import { IconButton } from "@/IconButton";
 import { FAMILY_NAMES } from "@/fonts";
@@ -201,7 +211,12 @@ function Sections({
               {...field((lineHeight: number) => ({ lineHeight }))}
             />
           </div>
-          <AlignButtons align={p.text.align} onSet={(textAlign) => onSet({ textAlign })} />
+          <Segmented
+            label="Text alignment"
+            options={TEXT_ALIGNS}
+            value={p.text.align}
+            onSet={(textAlign) => onSet({ textAlign })}
+          />
         </Section>
       )}
 
@@ -224,16 +239,51 @@ function Sections({
           {...field((strokeColor: Rgba) => ({ strokeColor }))}
         >
           {p.strokeWidth !== undefined && (
-            <div className="grid grid-cols-2 gap-1.5">
-              <NumberField
-                name="Stroke width"
-                label={<StrokeWidthIcon />}
-                value={p.strokeWidth}
-                min={0}
-                step={0.5}
-                {...field((strokeWidth: number) => ({ strokeWidth }))}
-              />
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-1.5">
+                <NumberField
+                  name="Stroke width"
+                  label={<StrokeWidthIcon />}
+                  value={p.strokeWidth}
+                  min={0}
+                  step={0.5}
+                  {...field((strokeWidth: number) => ({ strokeWidth }))}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Segmented
+                  label="Stroke ends"
+                  options={CAPS}
+                  value={p.strokeCap ?? "butt"}
+                  onSet={(strokeCap) => onSet({ strokeCap })}
+                />
+                <Segmented
+                  label="Stroke corners"
+                  options={JOINS}
+                  value={p.strokeJoin ?? "miter"}
+                  onSet={(strokeJoin) => onSet({ strokeJoin })}
+                />
+              </div>
+              {/* 0 is a solid line: typing a dash or a gap starts dashing. */}
+              <div className="grid grid-cols-2 gap-1.5">
+                <NumberField
+                  name="Dash"
+                  label="Dash"
+                  value={p.strokeDash ?? 0}
+                  min={0}
+                  step={1}
+                  {...field((strokeDash: number) => ({ strokeDash }))}
+                />
+                <NumberField
+                  name="Gap"
+                  label="Gap"
+                  value={p.strokeGap ?? 0}
+                  min={0}
+                  step={1}
+                  {...field((strokeGap: number) => ({ strokeGap }))}
+                />
+              </div>
+            </>
           )}
         </PaintSection>
       )}
@@ -379,28 +429,72 @@ function FamilyMenu({ family, onSet }: { family: string | Mixed; onSet: (family:
   );
 }
 
-const ALIGNMENTS: { align: TextAlign; label: string; icon: React.ReactNode }[] = [
-  { align: "left", label: "Align left", icon: <TextAlignStart /> },
-  { align: "center", label: "Align centre", icon: <TextAlignCenter /> },
-  { align: "right", label: "Align right", icon: <TextAlignEnd /> },
+type Option<T> = { value: T; label: string; icon: React.ReactNode };
+
+const TEXT_ALIGNS: readonly Option<TextAlign>[] = [
+  { value: "left", label: "Align text left", icon: <TextAlignStart /> },
+  { value: "center", label: "Centre text", icon: <TextAlignCenter /> },
+  { value: "right", label: "Align text right", icon: <TextAlignEnd /> },
 ];
 
-function AlignButtons({ align, onSet }: { align: TextAlign | Mixed; onSet: (align: TextAlign) => void }) {
+const CAPS: readonly Option<StrokeCap>[] = [
+  { value: "butt", label: "Flat ends", icon: <CapIcon cap="butt" /> },
+  { value: "round", label: "Round ends", icon: <CapIcon cap="round" /> },
+  { value: "square", label: "Square ends", icon: <CapIcon cap="square" /> },
+];
+
+const JOINS: readonly Option<StrokeJoin>[] = [
+  { value: "miter", label: "Sharp corners", icon: <JoinIcon join="miter" /> },
+  { value: "round", label: "Round corners", icon: <JoinIcon join="round" /> },
+  { value: "bevel", label: "Bevelled corners", icon: <JoinIcon join="bevel" /> },
+];
+
+/** A few icon buttons of which one is on, or none for a mixed selection. */
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onSet,
+}: {
+  label: string;
+  options: readonly Option<T>[];
+  value: T | Mixed;
+  onSet: (value: T) => void;
+}) {
   return (
-    <div role="group" aria-label="Text alignment" className="bg-muted/70 flex w-fit gap-0.5 rounded-md p-0.5">
-      {ALIGNMENTS.map((option) => (
+    <div role="group" aria-label={label} className="bg-muted/70 flex w-fit gap-0.5 rounded-md p-0.5">
+      {options.map((option) => (
         <Button
-          key={option.align}
+          key={option.value}
           size="icon-xs"
           aria-label={option.label}
-          aria-pressed={align === option.align}
+          aria-pressed={value === option.value}
           className="aria-pressed:bg-background aria-pressed:shadow-xs size-5"
-          onClick={() => onSet(option.align)}
+          onClick={() => onSet(option.value)}
         >
           {option.icon}
         </Button>
       ))}
     </div>
+  );
+}
+
+/** A thick line stopping at a thin mark: the cap draws itself past it, or not. */
+function CapIcon({ cap }: { cap: StrokeCap }) {
+  return (
+    <svg viewBox="0 0 12 12" fill="none" stroke="currentColor">
+      <path d="M1 6h6" strokeWidth={4} strokeLinecap={cap} />
+      <path d="M7 1.5v9" strokeWidth={0.75} opacity={0.55} />
+    </svg>
+  );
+}
+
+/** A thick corner drawn with the join it stands for. */
+function JoinIcon({ join }: { join: StrokeJoin }) {
+  return (
+    <svg viewBox="0 0 12 12" fill="none" stroke="currentColor">
+      <path d="M2.5 11V3.5H11" strokeWidth={3} strokeLinejoin={join} />
+    </svg>
   );
 }
 

@@ -16,7 +16,7 @@ use crate::color::LinearRgba;
 use crate::doc::Document;
 use crate::error::Result;
 use crate::geom::Affine;
-use crate::node::{BlendMode, NodeId, NodeKind};
+use crate::node::{BlendMode, LineCap, LineJoin, NodeId, NodeKind};
 
 /// The document as an SVG file the size of its artboard.
 pub fn to_svg(doc: &Document) -> Result<String> {
@@ -119,6 +119,26 @@ fn write_node(doc: &Document, id: NodeId, depth: usize, out: &mut String) -> Res
                 );
                 if let Some(alpha) = alpha {
                     let _ = write!(paint, r#" stroke-opacity="{alpha}""#);
+                }
+                // SVG's defaults are butt caps, miter joins and a miter
+                // limit of 4 — the renderer's too — so only differences go out.
+                match stroke.cap {
+                    LineCap::Butt => {}
+                    LineCap::Round => paint.push_str(r#" stroke-linecap="round""#),
+                    LineCap::Square => paint.push_str(r#" stroke-linecap="square""#),
+                }
+                match stroke.join {
+                    LineJoin::Miter => {}
+                    LineJoin::Round => paint.push_str(r#" stroke-linejoin="round""#),
+                    LineJoin::Bevel => paint.push_str(r#" stroke-linejoin="bevel""#),
+                }
+                if let Some(dash) = stroke.dash {
+                    let _ = write!(
+                        paint,
+                        r#" stroke-dasharray="{} {}""#,
+                        number(dash.length),
+                        number(dash.gap)
+                    );
                 }
             }
             let _ = writeln!(out, r#"{indent}<path{attrs} d="{d}"{paint}/>"#);

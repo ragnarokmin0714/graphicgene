@@ -27,7 +27,7 @@ use graphicgene_core::command::Command;
 use graphicgene_core::geom::{Affine, BezPath, Ellipse, Point, Rect, Shape, Size, Vec2};
 use graphicgene_core::gesture::{Modifiers, ShapeKind, TransformKind};
 use graphicgene_core::layers::{Arrange, Drop};
-use graphicgene_core::node::{Node, NodeId, Stroke};
+use graphicgene_core::node::{LineCap, LineJoin, Node, NodeId, Stroke};
 use graphicgene_core::path_edit::PressOutcome;
 use graphicgene_core::properties::{Properties, Property, Shared};
 use graphicgene_core::session::{
@@ -627,10 +627,13 @@ impl Editor {
 
     /// What the properties panel shows, as JSON: `null` with nothing
     /// selected, else `{count, x, y, width, height, rotation, opacity, fill,
-    /// stroke, strokeWidth}`. Rotation is in degrees, counter-clockwise. A
-    /// value the selected nodes do not share is `"mixed"`. A colour is
-    /// `[r, g, b, a]`, or `null` for none; `fill` and `stroke` are left out
-    /// when only groups are selected, `strokeWidth` when nothing is stroked.
+    /// stroke, strokeWidth, strokeCap, strokeJoin, strokeDash, strokeGap}`.
+    /// Rotation is in degrees, counter-clockwise. A value the selected nodes
+    /// do not share is `"mixed"`. A colour is `[r, g, b, a]`, or `null` for
+    /// none; `fill` and `stroke` are left out when only groups are selected,
+    /// the stroke's width and style when nothing is stroked. Caps are
+    /// "butt", "round" or "square", joins "miter", "round" or "bevel"; a
+    /// dash and gap of 0 mean a solid line.
     pub fn properties(&mut self) -> Result<String, JsError> {
         self.session.layout().map_err(to_js)?;
         let value = match self.session.properties().map_err(to_js)? {
@@ -643,8 +646,9 @@ impl Editor {
     /// Show a change to the selection without recording it: every move of a
     /// slider or a scrubbed number. `change` is JSON with one key — `x`,
     /// `y`, `width`, `height`, `rotation`, `opacity` (0–1), `fill` (a colour
-    /// or `null`), `stroke` (`null`, or `{color, width}`), `strokeColor` or
-    /// `strokeWidth`. False when there is nothing it could apply to.
+    /// or `null`), `stroke` (`null`, or `{color, width}`), `strokeColor`,
+    /// `strokeWidth`, `strokeCap`, `strokeJoin`, `strokeDash` or `strokeGap`.
+    /// False when there is nothing it could apply to.
     #[wasm_bindgen(js_name = previewProperty)]
     pub fn preview_property(&mut self, change: &str) -> Result<bool, JsError> {
         let property = parse_property(change)?;
@@ -937,10 +941,7 @@ impl Editor {
         tolerance: f64,
         srgb: &[u8],
     ) -> Result<(), JsError> {
-        let stroke = Stroke {
-            color: colour(srgb)?,
-            width: PEN_STROKE_WIDTH,
-        };
+        let stroke = Stroke::solid(colour(srgb)?, PEN_STROKE_WIDTH);
         self.session
             .pen_press(self.point(x, y), shift, self.distance(tolerance), stroke)
             .map_err(to_js)
@@ -1235,6 +1236,18 @@ fn properties_json(p: &Properties) -> Value {
     if let Some(width) = p.stroke_width {
         out["strokeWidth"] = shared(width, |w| json!(w));
     }
+    if let Some(cap) = p.stroke_cap {
+        out["strokeCap"] = shared(cap, |c| json!(cap_name(c)));
+    }
+    if let Some(join) = p.stroke_join {
+        out["strokeJoin"] = shared(join, |j| json!(join_name(j)));
+    }
+    if let Some(dash) = p.stroke_dash {
+        out["strokeDash"] = shared(dash, |d| json!(d));
+    }
+    if let Some(gap) = p.stroke_gap {
+        out["strokeGap"] = shared(gap, |g| json!(g));
+    }
     if let Some(text) = &p.text {
         out["text"] = json!({
             "family": shared(text.family.clone(), |f| json!(f)),
@@ -1271,14 +1284,28 @@ fn parse_property(change: &str) -> Result<Property, JsError> {
         "fill" if value.is_null() => Property::Fill(None),
         "fill" => Property::Fill(Some(colour(value)?)),
         "stroke" if value.is_null() => Property::Stroke(None),
-        "stroke" => Property::Stroke(Some(Stroke {
-            color: colour(&value["color"])?,
-            width: value["width"]
+        "stroke" => Property::Stroke(Some(Stroke::solid(
+            colour(&value["color"])?,
+            value["width"]
                 .as_f64()
                 .ok_or_else(|| invalid("a stroke needs a width"))?,
-        })),
+        ))),
         "strokeColor" => Property::StrokeColor(colour(value)?),
         "strokeWidth" => Property::StrokeWidth(number()?),
+        "strokeCap" => Property::StrokeCap(match value.as_str() {
+            Some("butt") => LineCap::Butt,
+            Some("round") => LineCap::Round,
+            Some("square") => LineCap::Square,
+            _ => return Err(invalid("expected butt, round or square")),
+        }),
+        "strokeJoin" => Property::StrokeJoin(match value.as_str() {
+            Some("miter") => LineJoin::Miter,
+            Some("round") => LineJoin::Round,
+            Some("bevel") => LineJoin::Bevel,
+            _ => return Err(invalid("expected miter, round or bevel")),
+        }),
+        "strokeDash" => Property::StrokeDash(number()?),
+        "strokeGap" => Property::StrokeGap(number()?),
         "fontFamily" => Property::FontFamily(
             value
                 .as_str()
@@ -1295,6 +1322,22 @@ fn parse_property(change: &str) -> Result<Property, JsError> {
         }),
         _ => return Err(invalid(&format!("unknown property {key}"))),
     })
+}
+
+fn cap_name(cap: LineCap) -> &'static str {
+    match cap {
+        LineCap::Butt => "butt",
+        LineCap::Round => "round",
+        LineCap::Square => "square",
+    }
+}
+
+fn join_name(join: LineJoin) -> &'static str {
+    match join {
+        LineJoin::Miter => "miter",
+        LineJoin::Round => "round",
+        LineJoin::Bevel => "bevel",
+    }
 }
 
 /// `[r, g, b, a]` in sRGB bytes.

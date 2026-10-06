@@ -23,10 +23,7 @@ const ALT: Modifiers = Modifiers {
     shift: false,
     alt: true,
 };
-const STROKE: Stroke = Stroke {
-    color: LinearRgba::BLACK,
-    width: 2.0,
-};
+const STROKE: Stroke = Stroke::solid(LinearRgba::BLACK, 2.0);
 
 fn id(subpath: usize, index: usize) -> AnchorId {
     AnchorId { subpath, index }

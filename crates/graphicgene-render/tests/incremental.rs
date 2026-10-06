@@ -5,8 +5,8 @@
 
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::doc::Document;
-use graphicgene_core::geom::{Affine, Ellipse, Rect, Shape};
-use graphicgene_core::node::{Node, NodeId, NodeKind, Stroke};
+use graphicgene_core::geom::{Affine, BezPath, Ellipse, Rect, Shape};
+use graphicgene_core::node::{Dash, LineCap, LineJoin, Node, NodeId, NodeKind, Stroke};
 use graphicgene_render::{
     CpuRenderer, Damage, PixelRect, RenderScene, Renderer, device_area, scroll,
 };
@@ -41,19 +41,41 @@ impl Rng {
 fn shape(rng: &mut Rng) -> Node {
     let (x, y) = (rng.range(-20.0, 150.0), rng.range(-20.0, 110.0));
     let (w, h) = (rng.range(4.0, 50.0), rng.range(4.0, 40.0));
-    let path = if rng.below(2) == 0 {
-        Rect::new(x, y, x + w, y + h).to_path(0.1)
-    } else {
-        Ellipse::new((x, y), (w / 2.0, h / 2.0), 0.0).to_path(0.1)
+    let path = match rng.below(4) {
+        0 => Rect::new(x, y, x + w, y + h).to_path(0.1),
+        1 => Ellipse::new((x, y), (w / 2.0, h / 2.0), 0.0).to_path(0.1),
+        // A sharp triangle: its tip is where a miter join reaches furthest.
+        2 => {
+            let mut path = BezPath::new();
+            path.move_to((x, y));
+            path.line_to((x + w, y + h * 0.1));
+            path.line_to((x, y + h * 0.2));
+            path.close_path();
+            path
+        }
+        // An open zigzag, whose ends show the caps.
+        _ => {
+            let mut path = BezPath::new();
+            path.move_to((x, y));
+            path.line_to((x + w / 2.0, y + h));
+            path.line_to((x + w, y));
+            path
+        }
     };
     let mut node = Node::vector("Shape", path, Some(rng.colour()));
     if rng.below(3) == 0
         && let NodeKind::Vector(v) = &mut node.kind
     {
-        v.stroke = Some(Stroke {
-            color: rng.colour(),
-            width: rng.range(0.5, 8.0),
-        });
+        let mut stroke = Stroke::solid(rng.colour(), rng.range(0.5, 8.0));
+        stroke.cap = [LineCap::Butt, LineCap::Round, LineCap::Square][rng.below(3) as usize];
+        stroke.join = [LineJoin::Miter, LineJoin::Round, LineJoin::Bevel][rng.below(3) as usize];
+        if rng.below(2) == 0 {
+            stroke.dash = Some(Dash {
+                length: rng.range(1.0, 10.0),
+                gap: rng.range(1.0, 10.0),
+            });
+        }
+        v.stroke = Some(stroke);
     }
     node
 }
@@ -242,10 +264,7 @@ fn damage_includes_the_whole_stroke() {
     let root = doc.root();
     let mut node = Node::vector("R", Rect::new(20.0, 20.0, 30.0, 30.0).to_path(0.1), None);
     if let NodeKind::Vector(v) = &mut node.kind {
-        v.stroke = Some(Stroke {
-            color: LinearRgba::BLACK,
-            width: 10.0,
-        });
+        v.stroke = Some(Stroke::solid(LinearRgba::BLACK, 10.0));
     }
     attach(&mut doc, root, node);
     let scene = RenderScene::build(&doc).unwrap();

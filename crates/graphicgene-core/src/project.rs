@@ -17,7 +17,11 @@ use crate::error::{CoreError, Result};
 /// - 2: text nodes (v0.3). Nothing else changed, so a build that reads 2
 ///   reads 1 as it always did; a v0.2 build refuses a 2 by its version
 ///   instead of failing on the text inside.
-pub const FORMAT_VERSION: u32 = 2;
+/// - 3: stroke caps, joins and dashes (v0.5). They are left out of the file
+///   when at their defaults, so a 2 reads as a 3 with plain strokes; an
+///   older build refuses a 3 rather than drawing its dashes solid and
+///   dropping them on the next save.
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {

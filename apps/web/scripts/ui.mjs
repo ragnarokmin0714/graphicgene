@@ -680,6 +680,26 @@ try {
   check(value("Opacity") === "100" && value("Stroke width") === "1", "each one undo step");
   await checkScreen("after property edits");
 
+  const pressedIn = (group) =>
+    panel().querySelector(`[role="group"][aria-label="${group}"] [aria-pressed="true"]`)?.getAttribute("aria-label");
+  check(
+    pressedIn("Stroke ends") === "Flat ends" && pressedIn("Stroke corners") === "Sharp corners" && value("Dash") === "0",
+    "a new stroke is solid, with flat ends and sharp corners",
+  );
+  await press(button("Round ends"));
+  await press(button("Bevelled corners"));
+  await typeInto("Dash", "6");
+  check(
+    pressedIn("Stroke ends") === "Round ends" &&
+      pressedIn("Stroke corners") === "Bevelled corners" &&
+      value("Dash") === "6" &&
+      value("Gap") === "6",
+    "ends, corners and dashes are set in the panel; a dash brings an equal gap",
+  );
+  await checkScreen("with a dashed stroke");
+  for (let i = 0; i < 3; i++) await key("z", { ctrlKey: true });
+  check(pressedIn("Stroke ends") === "Flat ends" && value("Dash") === "0", "each of those one undo step too");
+
   await press(button("Fill colour"));
   const picker = document.querySelector('[data-slot="popover-content"]');
   check(!!picker, "the swatch opens a colour picker");
@@ -926,8 +946,8 @@ try {
   const narrow = frameOf();
   await typeInto("Font size", "48");
   check(value("Font size") === "48" && frameOf() !== narrow, `a new size lays it out again (${frameOf()})`);
-  await press(button("Align centre"));
-  check(button("Align centre").getAttribute("aria-pressed") === "true", "alignment is set from the panel");
+  await press(button("Centre text"));
+  check(button("Centre text").getAttribute("aria-pressed") === "true", "alignment is set from the panel");
   await checkScreen("after restyling text");
 
   await doubleClick(460, 520);
@@ -966,7 +986,7 @@ try {
 
   const project = await downloadProject();
   check(
-    downloads.at(-1).filename === "graphicgene-project.json" && JSON.parse(project).version === 2,
+    downloads.at(-1).filename === "graphicgene-project.json" && JSON.parse(project).version === 3,
     "the project downloads as versioned JSON",
   );
 
@@ -1048,7 +1068,7 @@ try {
     "saving suggests the project file's name",
   );
   check(
-    saved.args instanceof Uint8Array && JSON.parse(decoder.decode(saved.args)).version === 2,
+    saved.args instanceof Uint8Array && JSON.parse(decoder.decode(saved.args)).version === 3,
     "and sends the project as raw bytes",
   );
   check(status().includes("Saved graphicgene-project.json"), `the status bar says where it went (${status()})`);

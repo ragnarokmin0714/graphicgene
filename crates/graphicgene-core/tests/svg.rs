@@ -4,7 +4,7 @@ use graphicgene_core::color::LinearRgba;
 use graphicgene_core::command::{Command, Journal};
 use graphicgene_core::doc::Document;
 use graphicgene_core::geom::{Affine, BezPath, Rect, Shape, Size};
-use graphicgene_core::node::{BlendMode, Node, NodeId, NodeKind, Stroke};
+use graphicgene_core::node::{BlendMode, Dash, LineCap, LineJoin, Node, NodeId, NodeKind, Stroke};
 use graphicgene_core::svg::to_svg;
 
 fn insert(doc: &mut Document, journal: &mut Journal, parent: NodeId, node: Node) -> NodeId {
@@ -100,10 +100,7 @@ fn groups_nest_hidden_nodes_are_omitted_and_strokes_are_written() {
     let group = insert(&mut doc, &mut journal, root, Node::group("Group"));
     let mut stroked = Node::vector("Line", square(), None);
     if let NodeKind::Vector(v) = &mut stroked.kind {
-        v.stroke = Some(Stroke {
-            color: LinearRgba::BLACK,
-            width: 2.0,
-        });
+        v.stroke = Some(Stroke::solid(LinearRgba::BLACK, 2.0));
     }
     insert(&mut doc, &mut journal, group, stroked);
     let mut hidden = Node::vector("Hidden", square(), Some(LinearRgba::BLACK));
@@ -137,6 +134,47 @@ fn names_are_escaped() {
     let svg = to_svg(&doc).unwrap();
     assert!(
         svg.contains(r#"data-name="&lt;a &amp; &quot;b&quot;&gt;""#),
+        "{svg}"
+    );
+}
+
+#[test]
+fn stroke_styles_are_written_when_not_svg_defaults() {
+    let mut doc = Document::new();
+    let mut journal = Journal::new();
+    let root = doc.root();
+    for (name, cap, join, dash) in [
+        ("Plain", LineCap::Butt, LineJoin::Miter, None),
+        (
+            "Styled",
+            LineCap::Round,
+            LineJoin::Bevel,
+            Some(Dash {
+                length: 4.0,
+                gap: 1.5,
+            }),
+        ),
+    ] {
+        let mut node = Node::vector(name, square(), None);
+        if let NodeKind::Vector(v) = &mut node.kind {
+            v.stroke = Some(Stroke {
+                cap,
+                join,
+                dash,
+                ..Stroke::solid(LinearRgba::BLACK, 2.0)
+            });
+        }
+        insert(&mut doc, &mut journal, root, node);
+    }
+    let svg = to_svg(&doc).unwrap();
+    let line = |name: &str| svg.lines().find(|l| l.contains(name)).unwrap().to_owned();
+    assert!(
+        !line("Plain").contains("linecap") && !line("Plain").contains("dash"),
+        "{svg}"
+    );
+    assert!(
+        line("Styled")
+            .contains(r#"stroke-linecap="round" stroke-linejoin="bevel" stroke-dasharray="4 1.5""#),
         "{svg}"
     );
 }

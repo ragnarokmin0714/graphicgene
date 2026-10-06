@@ -214,3 +214,50 @@ fn the_artboard_is_saved_and_older_files_get_the_default() {
     let old = Project::from_json(&value.to_string()).unwrap().document;
     assert_eq!(old.artboard(), DEFAULT_ARTBOARD);
 }
+
+#[test]
+fn stroke_styles_round_trip_and_plain_strokes_are_written_as_before() {
+    use graphicgene_core::node::{Dash, LineCap, LineJoin, NodeKind, Stroke};
+
+    let mut doc = Document::new();
+    let mut journal = Journal::new();
+    let styled = insert(&mut doc, &mut journal, rect_node("Styled"));
+    let plain = insert(&mut doc, &mut journal, rect_node("Plain"));
+    let style = Stroke {
+        cap: LineCap::Square,
+        join: LineJoin::Round,
+        dash: Some(Dash {
+            length: 3.0,
+            gap: 2.0,
+        }),
+        ..Stroke::solid(LinearRgba::BLACK, 1.0)
+    };
+    for (id, stroke) in [
+        (styled, style),
+        (plain, Stroke::solid(LinearRgba::BLACK, 1.0)),
+    ] {
+        if let NodeKind::Vector(v) = &mut doc.get_mut(id).unwrap().kind {
+            v.stroke = Some(stroke);
+        }
+    }
+    let text = Project::new(doc).to_json().unwrap();
+    let back = Project::from_json(&text).unwrap().document;
+    let stroke_of = |id| match &back.get(id).unwrap().kind {
+        NodeKind::Vector(v) => v.stroke.unwrap(),
+        _ => unreachable!(),
+    };
+    assert_eq!(stroke_of(styled), style);
+    assert_eq!(stroke_of(plain), Stroke::solid(LinearRgba::BLACK, 1.0));
+
+    // A plain stroke is written exactly as a version 2 file had it, so
+    // version 2 files read as plain strokes.
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["version"], 3);
+    let plain_json = value.to_string();
+    assert!(plain_json.contains(r#""stroke":{"color":"#));
+    assert_eq!(
+        plain_json.matches("\"cap\"").count(),
+        1,
+        "only the styled one: {plain_json}"
+    );
+}

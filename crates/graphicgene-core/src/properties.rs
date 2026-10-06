@@ -19,7 +19,7 @@ use crate::doc::Document;
 use crate::error::Result;
 use crate::geom::{Affine, Vec2};
 use crate::gesture::Frame;
-use crate::node::{Node, NodeId, NodeKind, Stroke, VectorNode};
+use crate::node::{Dash, LineCap, LineJoin, Node, NodeId, NodeKind, Stroke, VectorNode};
 use crate::text::{TextAlign, TextNode, TextStyle};
 
 /// The smallest width or height a field can set, in document units: a frame
@@ -73,8 +73,13 @@ pub struct Properties {
     /// only, as for `fill`.
     pub stroke: Option<Shared<Option<LinearRgba>>>,
     /// The width of the strokes there are. `None` when nothing selected has
-    /// a stroke.
+    /// a stroke, as for the rest of the stroke's style.
     pub stroke_width: Option<Shared<f64>>,
+    pub stroke_cap: Option<Shared<LineCap>>,
+    pub stroke_join: Option<Shared<LineJoin>>,
+    /// Dash length and gap; 0 for a solid line.
+    pub stroke_dash: Option<Shared<f64>>,
+    pub stroke_gap: Option<Shared<f64>>,
     /// What the selected text has in common; `None` when there is none.
     pub text: Option<TextProperties>,
 }
@@ -104,8 +109,16 @@ pub enum Property {
     /// get a thin one.
     StrokeColor(LinearRgba),
     /// Re-width strokes, keeping each one's colour; paths without a stroke
-    /// are left alone.
+    /// are left alone, as by the rest of the stroke's style.
     StrokeWidth(f64),
+    StrokeCap(LineCap),
+    StrokeJoin(LineJoin),
+    /// The length of a dash; 0 makes the line solid. A solid line gets gaps
+    /// as long as its dashes.
+    StrokeDash(f64),
+    /// The gap between dashes; 0 makes the line solid. A solid line gets
+    /// dashes as long as its gaps.
+    StrokeGap(f64),
     /// Text only, as are the rest.
     FontFamily(String),
     FontSize(f64),
@@ -147,6 +160,7 @@ pub fn properties(doc: &Document, ids: &[NodeId]) -> Result<Option<Properties>> 
         .iter()
         .map(|v| v.fill)
         .chain(texts.iter().map(|t| t.fill));
+    let strokes = || vectors.iter().filter_map(|v| v.stroke);
     let text = (!texts.is_empty()).then(|| TextProperties {
         family: Shared::of(texts.iter().map(|t| t.style.family.clone())).expect("some text"),
         size: Shared::of(texts.iter().map(|t| t.style.size)).expect("some text"),
@@ -163,7 +177,11 @@ pub fn properties(doc: &Document, ids: &[NodeId]) -> Result<Option<Properties>> 
         opacity: Shared::of(nodes.iter().map(|n| n.common.opacity)).unwrap_or(Shared::Same(1.0)),
         fill: Shared::of(fills),
         stroke: Shared::of(vectors.iter().map(|v| v.stroke.map(|s| s.color))),
-        stroke_width: Shared::of(vectors.iter().filter_map(|v| v.stroke).map(|s| s.width)),
+        stroke_width: Shared::of(strokes().map(|s| s.width)),
+        stroke_cap: Shared::of(strokes().map(|s| s.cap)),
+        stroke_join: Shared::of(strokes().map(|s| s.join)),
+        stroke_dash: Shared::of(strokes().map(|s| s.dash.map_or(0.0, |d| d.length))),
+        stroke_gap: Shared::of(strokes().map(|s| s.dash.map_or(0.0, |d| d.gap))),
         text,
     }))
 }
@@ -339,8 +357,10 @@ fn apply(doc: &mut Document, ids: &[NodeId], property: &Property) -> Result<()> 
         }
         Property::Stroke(stroke) => paint(doc, ids, |v| v.stroke = stroke)?,
         Property::StrokeColor(color) => paint(doc, ids, |v| {
-            let width = v.stroke.map_or(DEFAULT_STROKE_WIDTH, |s| s.width);
-            v.stroke = Some(Stroke { color, width });
+            v.stroke = Some(match v.stroke {
+                Some(stroke) => Stroke { color, ..stroke },
+                None => Stroke::solid(color, DEFAULT_STROKE_WIDTH),
+            });
         })?,
         Property::StrokeWidth(width) => {
             let width = if width.is_finite() {
@@ -352,6 +372,26 @@ fn apply(doc: &mut Document, ids: &[NodeId], property: &Property) -> Result<()> 
                 if let Some(stroke) = &mut v.stroke {
                     stroke.width = width;
                 }
+            })?;
+        }
+        Property::StrokeCap(cap) => strokes(doc, ids, |s| s.cap = cap)?,
+        Property::StrokeJoin(join) => strokes(doc, ids, |s| s.join = join)?,
+        Property::StrokeDash(length) => {
+            let length = length_or_zero(length);
+            strokes(doc, ids, |s| {
+                s.dash = (length > 0.0).then(|| Dash {
+                    length,
+                    gap: s.dash.map_or(length, |d| d.gap),
+                });
+            })?;
+        }
+        Property::StrokeGap(gap) => {
+            let gap = length_or_zero(gap);
+            strokes(doc, ids, |s| {
+                s.dash = (gap > 0.0).then(|| Dash {
+                    length: s.dash.map_or(gap, |d| d.length),
+                    gap,
+                });
             })?;
         }
         Property::FontFamily(ref family) => text(doc, ids, |t| t.style.family.clone_from(family))?,
@@ -367,6 +407,24 @@ fn apply(doc: &mut Document, ids: &[NodeId], property: &Property) -> Result<()> 
         Property::FontSize(_) | Property::LineHeight(_) => {}
     }
     Ok(())
+}
+
+/// Change the strokes there are; paths without one are left alone.
+fn strokes(doc: &mut Document, ids: &[NodeId], mut change: impl FnMut(&mut Stroke)) -> Result<()> {
+    paint(doc, ids, |v| {
+        if let Some(stroke) = &mut v.stroke {
+            change(stroke);
+        }
+    })
+}
+
+/// A typed dash or gap length: negative and non-numbers count as none.
+fn length_or_zero(length: f64) -> f64 {
+    if length.is_finite() {
+        length.max(0.0)
+    } else {
+        0.0
+    }
 }
 
 fn text(doc: &mut Document, ids: &[NodeId], mut change: impl FnMut(&mut TextNode)) -> Result<()> {

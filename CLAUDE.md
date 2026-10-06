@@ -39,13 +39,13 @@ What is next, and the known architectural debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 144 tests, including a randomized check that
+- `cargo test --workspace` — 149 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 210
+- `pnpm ui` — the React app driven in jsdom against the real core: 214
   checks, including zoom and pan, the properties panel and its colour
   picker, the layer panel's rename, toggles and drag to reorder, the
   clipboard, the desktop app's storage through a stand-in for its Rust
@@ -395,7 +395,8 @@ Versioned JSON, backward compatible from v0.1 onward. The `version` field is rea
 before anything else, and unknown fields round-trip rather than being dropped.
 Version 2 (v0.3) added text nodes; a build reads every version up to its own,
 so a v0.2 build refuses a file with text by its version, not by failing on
-the text.
+the text. Version 3 (v0.5) added stroke caps, joins and dashes, written only
+when not the default, so a version 2 file reads as plain strokes.
 
 - serde_json's `float_roundtrip` feature is load-bearing: without it, parsing
   can be one ulp off, and since autosave re-reads the project on every visit,
