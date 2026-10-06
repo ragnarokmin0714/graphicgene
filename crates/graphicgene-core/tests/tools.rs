@@ -222,6 +222,47 @@ fn escape_backs_out_one_level_and_enter_finishes() {
 }
 
 #[test]
+fn a_press_away_from_the_path_stops_editing_points() {
+    let mut session = Session::new();
+    let first = square(&mut session);
+    let other = session
+        .insert(Node::vector(
+            "Other",
+            Rect::new(100.0, 0.0, 120.0, 20.0).to_path(0.1),
+            Some(RED),
+        ))
+        .unwrap();
+    click(&mut session, at(10.0, 10.0));
+    session.enter().unwrap();
+    assert_eq!(session.mode(), Some(Mode::PathEdit));
+
+    // Inside the shape, or with Shift held anywhere, a press stays with the
+    // points.
+    click(&mut session, at(10.0, 10.0));
+    click(&mut session, shifted(at(60.0, 60.0)));
+    assert_eq!(session.mode(), Some(Mode::PathEdit));
+
+    // On another shape it stops editing, and selects that one.
+    click(&mut session, at(110.0, 10.0));
+    assert_eq!(session.mode(), None);
+    assert_eq!(session.selection().ids(), &[other]);
+
+    // On empty space it stops editing, and clears the selection.
+    click(&mut session, at(10.0, 10.0));
+    session.enter().unwrap();
+    click(&mut session, at(60.0, 60.0));
+    assert_eq!(session.mode(), None);
+    assert!(session.selection().is_empty());
+
+    // Escape stops it too, keeping the path selected.
+    click(&mut session, at(10.0, 10.0));
+    session.enter().unwrap();
+    session.escape().unwrap();
+    assert_eq!(session.mode(), None);
+    assert_eq!(session.selection().ids(), &[first]);
+}
+
+#[test]
 fn picking_up_a_tool_finishes_the_pen_path() {
     let mut session = Session::new();
     session.set_tool(Tool::Pen).unwrap();

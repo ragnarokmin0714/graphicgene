@@ -514,6 +514,13 @@ try {
   check(anchorMarks().length === 3, "Delete removes it");
   await key("Enter");
   check(!status().includes("Drag points") && !!frame(), "Enter finishes editing");
+  await doubleClick(150, 300);
+  await key("Escape");
+  check(!status().includes("Drag points") && !!frame(), "so does Escape, keeping the path selected");
+  await doubleClick(150, 300);
+  check(status().includes("Drag points"), "editing again");
+  await click(790, 590);
+  check(!status().includes("Drag points"), "a click away from the path finishes editing too");
 
   const layersNow = layerCount();
   await key("p");

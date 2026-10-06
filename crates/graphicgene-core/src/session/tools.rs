@@ -14,6 +14,7 @@ use crate::geom::Point;
 use crate::gesture::{Modifiers, ShapeKind, TransformKind};
 use crate::hit;
 use crate::node::{NodeId, NodeKind, Stroke};
+use crate::path_edit::{PathEdit, PressOutcome};
 
 use super::{Mode, SelectOutcome, Session};
 
@@ -111,8 +112,7 @@ impl Session {
             };
             self.pen_press(point, modifiers.shift, at.pick_tolerance, stroke)?;
             Route::Pen
-        } else if self.mode() == Some(Mode::PathEdit) {
-            self.path_press(point, at.pick_tolerance, modifiers.shift)?;
+        } else if self.mode() == Some(Mode::PathEdit) && self.press_keeps_path_edit(at)? {
             Route::Path
         } else {
             match self.tool {
@@ -244,6 +244,27 @@ impl Session {
             self.begin_path_edit()?;
         }
         Ok(())
+    }
+
+    /// A press while editing points. On a point, a handle or the outline it
+    /// edits them; anywhere else on the path it only clears the picked
+    /// points. Off the path altogether it stops editing and returns false,
+    /// so the press carries on as a select press — clicking another shape
+    /// selects it, clicking empty space clears the selection, as clicking
+    /// away does in other editors. Shift keeps editing: it adds points.
+    fn press_keeps_path_edit(&mut self, at: Pointer) -> Result<bool> {
+        let outcome = self.path_press(at.point, at.pick_tolerance, at.modifiers.shift)?;
+        if outcome != PressOutcome::Miss || at.modifiers.shift {
+            return Ok(true);
+        }
+        let editing = self.path_edit.as_ref().map(PathEdit::id);
+        if editing.is_some()
+            && hit::hit_test(&self.document, at.point, at.hit_tolerance)? == editing
+        {
+            return Ok(true);
+        }
+        self.end_path_edit()?;
+        Ok(false)
     }
 
     /// Type into the one selected node, if it is text.

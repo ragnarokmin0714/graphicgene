@@ -38,13 +38,13 @@ What is next, and the known architectural debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 137 tests, including a randomized check that
+- `cargo test --workspace` — 138 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 197
+- `pnpm ui` — the React app driven in jsdom against the real core: 200
   checks, including zoom and pan, the properties panel and its colour
   picker, the layer panel's rename, toggles and drag to reorder, the
   clipboard, the desktop app's storage through a stand-in for its Rust

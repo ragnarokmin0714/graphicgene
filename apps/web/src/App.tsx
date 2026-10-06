@@ -38,7 +38,7 @@ function hintFor(tool: Tool, mode: EditorMode | null): string | null {
     return `Click the first point to close · Enter or Esc to finish · ${MOD}+Z removes the last point`;
   }
   if (mode === "path") {
-    return "Drag points and handles · Click a segment to add a point · Double-click a point for corner/curve · Enter to finish";
+    return "Drag points and handles · Click a segment to add a point · Double-click a point for corner/curve · Enter, Esc or a click away to finish";
   }
   if (mode === "text") return "Type · Esc or click outside to finish";
   switch (tool) {
