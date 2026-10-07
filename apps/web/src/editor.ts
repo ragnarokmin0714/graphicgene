@@ -182,13 +182,16 @@ export type Overlay = {
   text?: TextOverlay;
   /** Where the artboard is on screen (x0, y0, x1, y1), and its size in document units. */
   artboard: { rect: readonly [number, number, number, number]; width: number; height: number };
+  /** Lines the drag in progress snapped to, x0, y0, x1, y1 in screen pixels. */
+  guides: readonly (readonly [number, number, number, number])[];
 };
 
 /** What the pointer does on the canvas. Session state, kept in the core. */
 export type Tool = "select" | "rect" | "ellipse" | "pen" | "text";
 
 /** Modifier keys held during a press or a move. */
-export type Keys = { shift: boolean; alt: boolean };
+/** Modifier keys held during a press or a move. `ctrl` is Ctrl or ⌘: it turns snapping off while held. */
+export type Keys = { shift: boolean; alt: boolean; ctrl?: boolean };
 
 /** An exported image: straight-alpha RGBA rows, ready for `ImageData`. */
 export type ExportedImage = { width: number; height: number; pixels: Uint8ClampedArray<ArrayBuffer> };
@@ -323,12 +326,24 @@ export class EditorHandle {
   /** A press at a screen point; `color` is for whatever it starts drawing. */
   pointerDown(at: Point, keys: Keys, grab: HandleTarget | null, color: Rgba): void {
     const [u, v] = grab?.kind === "scale" ? [grab.u, grab.v] : [0, 0];
-    this.inner.pointerDown(at[0], at[1], keys.shift, keys.alt, grab?.kind ?? "", u, v, HIT_RADIUS, PICK_RADIUS, new Uint8Array(color));
+    this.inner.pointerDown(
+      at[0],
+      at[1],
+      keys.shift,
+      keys.alt,
+      keys.ctrl ?? false,
+      grab?.kind ?? "",
+      u,
+      v,
+      HIT_RADIUS,
+      PICK_RADIUS,
+      new Uint8Array(color),
+    );
   }
 
   /** A move, pressed or not; true if the overlay changed. */
   pointerMove(at: Point, keys: Keys): boolean {
-    return this.inner.pointerMove(at[0], at[1], keys.shift, keys.alt, HIT_RADIUS, PICK_RADIUS);
+    return this.inner.pointerMove(at[0], at[1], keys.shift, keys.alt, keys.ctrl ?? false, HIT_RADIUS, PICK_RADIUS);
   }
 
   pointerUp(): void {
@@ -622,6 +637,15 @@ export class EditorHandle {
 
   layers(): LayerRow[] {
     return JSON.parse(this.inner.layerTree()) as LayerRow[];
+  }
+
+  /** Whether moving and drawing snap to other layers and the artboard. A viewer's choice, not saved. */
+  get snapping(): boolean {
+    return this.inner.snapping();
+  }
+
+  setSnapping(on: boolean): void {
+    this.inner.setSnapping(on);
   }
 
   /** Changes whenever `layers()` may have: cache the rows on it. */

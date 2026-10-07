@@ -12,7 +12,7 @@ import { detectPlatform, type OpenedFile, type Platform } from "@/platform";
 import { type ArrangeActions, type PropertyActions, PropertiesPanel } from "@/PropertiesPanel";
 import { MOD, type Shortcut, useShortcuts } from "@/shortcuts";
 import { Stage } from "@/Stage";
-import { StatusBar, type ZoomActions } from "@/StatusBar";
+import { StatusBar, type ViewActions } from "@/StatusBar";
 import { ToolDock } from "@/ToolDock";
 import { useEditor } from "@/useEditor";
 
@@ -336,11 +336,13 @@ export function App() {
   ]);
 
   // The view: per-viewer state that the core keeps, like the selection.
-  const zoomActions: ZoomActions = {
+  const viewActions: ViewActions = {
     zoomIn: () => run((editor) => editor.zoomIn()),
     zoomOut: () => run((editor) => editor.zoomOut()),
     zoomTo100: () => run((editor) => editor.zoomTo(1)),
     zoomToFit: () => run((editor) => editor.zoomToFit()),
+    snapping: core?.snapping ?? true,
+    toggleSnapping: () => run((editor) => editor.setSnapping(!editor.snapping)),
   };
 
   useShortcuts([
@@ -371,12 +373,14 @@ export function App() {
     { key: "y", mod: true, run: redo },
     { key: "s", mod: true, run: () => void save(true) },
     // "=" is where "+" lives unshifted; the numpad's "+" needs no Shift.
-    { key: "=", mod: true, run: zoomActions.zoomIn },
-    { key: "+", mod: true, run: zoomActions.zoomIn },
-    { key: "+", mod: true, shift: true, run: zoomActions.zoomIn },
-    { key: "-", mod: true, run: zoomActions.zoomOut },
-    { key: "0", mod: true, run: zoomActions.zoomTo100 },
-    { code: "Digit1", shift: true, run: zoomActions.zoomToFit },
+    { key: "=", mod: true, run: viewActions.zoomIn },
+    { key: "+", mod: true, run: viewActions.zoomIn },
+    { key: "+", mod: true, shift: true, run: viewActions.zoomIn },
+    { key: "-", mod: true, run: viewActions.zoomOut },
+    { key: "0", mod: true, run: viewActions.zoomTo100 },
+    { code: "Digit1", shift: true, run: viewActions.zoomToFit },
+    // Illustrator's Smart Guides toggle.
+    { key: "u", mod: true, run: viewActions.toggleSnapping },
     { key: "o", mod: true, run: open },
     { key: "e", mod: true, shift: true, run: exportSvg },
     ...arrows,
@@ -443,7 +447,7 @@ export function App() {
         <StatusBar
           artboard={artboard}
           zoom={zoom}
-          zoomActions={zoomActions}
+          viewActions={viewActions}
           layerCount={layerCount}
           selectionCount={selectionCount}
           hint={hintFor(tool, mode)}

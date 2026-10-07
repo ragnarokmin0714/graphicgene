@@ -29,6 +29,7 @@ pub mod project;
 pub mod properties;
 pub mod selection;
 pub mod session;
+pub mod snap;
 pub mod svg;
 #[cfg(feature = "testing")]
 pub mod testing;

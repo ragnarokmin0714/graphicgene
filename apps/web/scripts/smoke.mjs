@@ -355,8 +355,13 @@ assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to")
   routed.setViewport(128, 128, 1); // the 64px artboard at 50%, from (48, 48)
   const HIT = 4;
   const PICK = 6;
-  const press = (x, y, grab = "") => routed.pointerDown(x, y, false, false, grab, 1, 1, HIT, PICK, RED);
-  const moveTo = (x, y) => routed.pointerMove(x, y, false, false, HIT, PICK);
+  // shift, alt, ctrl: none held.
+  const press = (x, y, grab = "") => routed.pointerDown(x, y, false, false, false, grab, 1, 1, HIT, PICK, RED);
+  const moveTo = (x, y) => routed.pointerMove(x, y, false, false, false, HIT, PICK);
+  // This checks where input is routed, to exact pixels; snapping, which
+  // would pull them onto the artboard's lines, is checked below.
+  assert.equal(routed.snapping(), true, "snapping starts on");
+  routed.setSnapping(false);
   routed.setTool("rect");
   press(58, 58);
   moveTo(68, 63);
@@ -384,6 +389,26 @@ assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to")
   routed.escape();
   assert.equal(routed.selectionCount(), 0, "then the selection");
   assert.throws(() => routed.setTool("brush"), /select, rect, ellipse, pen or text/);
+
+  // Snapping, through the boundary: the artboard's centre is (64, 64) on
+  // screen, and a press 3px off it — within the 6px pick distance — lands
+  // on it, with a guide on each axis while the drag lasts. Ctrl held, a
+  // press there stays where it is.
+  routed.setSnapping(true);
+  routed.setTool("rect");
+  press(61, 66);
+  assert.equal(JSON.parse(routed.overlay()).guides.length, 2, "a guide per axis while snapped");
+  // Clear of the artboard's lines and of the shape above's (68–88 across).
+  moveTo(100, 100);
+  assert.equal(JSON.parse(routed.overlay()).guides.length, 0, "the far corner caught on nothing");
+  routed.pointerUp();
+  assert.deepEqual(JSON.parse(routed.overlay()).frame.corners[0], [64, 64], "the press snapped to the centre");
+  assert.equal(JSON.parse(routed.overlay()).guides.length, 0, "no guides after");
+  routed.setTool("rect");
+  routed.pointerDown(61, 66, false, false, true, "", 1, 1, HIT, PICK, RED);
+  routed.pointerMove(100, 100, false, false, true, HIT, PICK);
+  routed.pointerUp();
+  assert.deepEqual(JSON.parse(routed.overlay()).frame.corners[0], [61, 66], "Ctrl held: no snapping");
 }
 
 // Text in a real font — Noto Sans TC, sliced as the page loads it — typed
@@ -428,7 +453,7 @@ assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to")
   const typed = new Editor(W, H);
   assert.equal(typed.addFont(await slice("latin")), "Noto Sans TC");
   typed.setTool("text");
-  typed.pointerDown(4, 8, false, false, "", 0, 0, 4, 6, RED);
+  typed.pointerDown(4, 8, false, false, false, "", 0, 0, 4, 6, RED);
   typed.pointerUp();
   const field = JSON.parse(typed.overlay());
   assert.equal(field.mode, "text");

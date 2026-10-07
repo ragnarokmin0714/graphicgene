@@ -31,6 +31,7 @@ them.
 | `V` `R` `O` `P` `T` | Select, Rectangle, Ellipse, Pen, Text |
 | Text | Click to type; double-click text or press `Enter` to edit it; `Esc` or a click away to finish. Fonts load as the text needs them |
 | Drag with a shape tool | Draw it — `Shift` for equal sides, `Alt` from the centre |
+| Snapping | Moving and drawing catch on other layers' and the artboard's edges and centres, with a red guide; hold `Ctrl/⌘` to skip it for one drag, `Ctrl/⌘ U` or the zoom menu to turn it off |
 | Pen | Click for a corner, drag for a curve; click the first point to close, `Enter` to finish |
 | Double-click a path | Edit its points: drag points and handles, click a segment to add a point, double-click a point for corner/curve; `Esc`, `Enter` or a click away from the path to finish |
 | Handles on a selection | Scale (`Shift` keeps proportions, `Alt` from the centre); just outside a corner rotates (`Shift` snaps to 15°) |

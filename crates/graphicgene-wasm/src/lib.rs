@@ -798,6 +798,7 @@ impl Editor {
         y: f64,
         shift: bool,
         alt: bool,
+        ctrl: bool,
         grab: &str,
         u: f64,
         v: f64,
@@ -810,7 +811,7 @@ impl Editor {
             "rotate" => Some(Grab::Rotate),
             _ => None,
         };
-        let pointer = self.pointer(x, y, shift, alt, hit, pick);
+        let pointer = self.pointer(x, y, shift, alt, ctrl, hit, pick);
         self.session
             .pointer_down(pointer, grab, colour(srgb)?)
             .map_err(to_js)
@@ -819,17 +820,29 @@ impl Editor {
     /// A move, pressed or not. True if what is drawn over the artwork
     /// changed: always while pressed, and when the hover changes.
     #[wasm_bindgen(js_name = pointerMove)]
+    #[allow(clippy::too_many_arguments)]
     pub fn pointer_move(
         &mut self,
         x: f64,
         y: f64,
         shift: bool,
         alt: bool,
+        ctrl: bool,
         hit: f64,
         pick: f64,
     ) -> Result<bool, JsError> {
-        let pointer = self.pointer(x, y, shift, alt, hit, pick);
+        let pointer = self.pointer(x, y, shift, alt, ctrl, hit, pick);
         self.session.pointer_move(pointer).map_err(to_js)
+    }
+
+    /// Whether moving and drawing snap to other layers and the artboard.
+    pub fn snapping(&self) -> bool {
+        self.session.snapping()
+    }
+
+    #[wasm_bindgen(js_name = setSnapping)]
+    pub fn set_snapping(&mut self, on: bool) {
+        self.session.set_snapping(on);
     }
 
     #[wasm_bindgen(js_name = pointerUp)]
@@ -845,7 +858,7 @@ impl Editor {
 
     #[wasm_bindgen(js_name = doubleClick)]
     pub fn double_click(&mut self, x: f64, y: f64, hit: f64, pick: f64) -> Result<(), JsError> {
-        let pointer = self.pointer(x, y, false, false, hit, pick);
+        let pointer = self.pointer(x, y, false, false, false, hit, pick);
         self.session.double_click(pointer).map_err(to_js)
     }
 
@@ -919,7 +932,14 @@ impl Editor {
         alt: bool,
     ) -> Result<(), JsError> {
         self.session
-            .update_gesture(self.point(x, y), Modifiers { shift, alt })
+            .update_gesture(
+                self.point(x, y),
+                Modifiers {
+                    shift,
+                    alt,
+                    ..Modifiers::default()
+                },
+            )
             .map_err(to_js)
     }
 
@@ -1017,7 +1037,14 @@ impl Editor {
     #[wasm_bindgen(js_name = pathDrag)]
     pub fn path_drag(&mut self, x: f64, y: f64, shift: bool, alt: bool) -> Result<(), JsError> {
         self.session
-            .path_drag(self.point(x, y), Modifiers { shift, alt })
+            .path_drag(
+                self.point(x, y),
+                Modifiers {
+                    shift,
+                    alt,
+                    ..Modifiers::default()
+                },
+            )
             .map_err(to_js)
     }
 
@@ -1067,10 +1094,20 @@ impl Editor {
         Ok(id)
     }
 
-    fn pointer(&self, x: f64, y: f64, shift: bool, alt: bool, hit: f64, pick: f64) -> Pointer {
+    #[allow(clippy::too_many_arguments)]
+    fn pointer(
+        &self,
+        x: f64,
+        y: f64,
+        shift: bool,
+        alt: bool,
+        ctrl: bool,
+        hit: f64,
+        pick: f64,
+    ) -> Pointer {
         Pointer {
             point: self.point(x, y),
-            modifiers: Modifiers { shift, alt },
+            modifiers: Modifiers { shift, alt, ctrl },
             hit_tolerance: self.distance(hit),
             pick_tolerance: self.distance(pick),
         }
@@ -1142,6 +1179,12 @@ fn overlay_json(overlay: &Overlay, to_screen: Affine, artboard: Size) -> Value {
         "marquee": overlay.marquee.map(rect),
         "locked": overlay.locked,
         "gesture": overlay.gesture,
+        "guides": overlay
+            .guides
+            .iter()
+            .flatten()
+            .map(|g| line(&(g.from, g.to)))
+            .collect::<Vec<_>>(),
         "artboard": {
             "rect": rect(Rect::new(0.0, 0.0, artboard.width, artboard.height)),
             "width": artboard.width,

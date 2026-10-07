@@ -12,14 +12,17 @@ use graphicgene_core::selection::Selection;
 const NONE: Modifiers = Modifiers {
     shift: false,
     alt: false,
+    ctrl: false,
 };
 const SHIFT: Modifiers = Modifiers {
     shift: true,
     alt: false,
+    ctrl: false,
 };
 const ALT: Modifiers = Modifiers {
     shift: false,
     alt: true,
+    ctrl: false,
 };
 
 /// A filled square with its top-left corner at (x, y).
@@ -60,11 +63,11 @@ fn drag(
     to: (f64, f64),
     modifiers: Modifiers,
 ) {
-    let mut gesture = Gesture::transform(doc, selection, kind, from.into())
+    let mut gesture = Gesture::transform(doc, selection, kind, from.into(), false)
         .unwrap()
         .expect("selection has a frame");
     gesture
-        .update(doc, selection, to.into(), modifiers)
+        .update(doc, selection, to.into(), modifiers, 0.0)
         .unwrap();
     gesture.commit(doc, journal, selection).unwrap();
 }
@@ -165,13 +168,20 @@ fn a_whole_drag_is_one_undo_step() {
     let mut selection = Selection::new();
     selection.set([id]);
 
-    let mut gesture =
-        Gesture::transform(&doc, &selection, TransformKind::Move, Point::new(5.0, 5.0))
-            .unwrap()
-            .unwrap();
+    let mut gesture = Gesture::transform(
+        &doc,
+        &selection,
+        TransformKind::Move,
+        Point::new(5.0, 5.0),
+        false,
+    )
+    .unwrap()
+    .unwrap();
     for step in 1..=50 {
         let p = Point::new(5.0 + step as f64, 5.0);
-        gesture.update(&mut doc, &mut selection, p, NONE).unwrap();
+        gesture
+            .update(&mut doc, &mut selection, p, NONE, 0.0)
+            .unwrap();
     }
     gesture
         .commit(&mut doc, &mut journal, &mut selection)
@@ -369,12 +379,17 @@ fn cancel_restores_transforms_and_selection() {
     let mut selection = Selection::new();
     selection.set([id]);
 
-    let mut gesture =
-        Gesture::transform(&doc, &selection, TransformKind::Move, Point::new(0.0, 0.0))
-            .unwrap()
-            .unwrap();
+    let mut gesture = Gesture::transform(
+        &doc,
+        &selection,
+        TransformKind::Move,
+        Point::new(0.0, 0.0),
+        false,
+    )
+    .unwrap()
+    .unwrap();
     gesture
-        .update(&mut doc, &mut selection, Point::new(40.0, 40.0), NONE)
+        .update(&mut doc, &mut selection, Point::new(40.0, 40.0), NONE, 0.0)
         .unwrap();
     gesture.cancel(&mut doc, &mut selection).unwrap();
     assert_eq!(world_bounds(&doc, id), Rect::new(0.0, 0.0, 10.0, 10.0));
@@ -396,10 +411,11 @@ fn drawing_a_shape_is_one_undoable_insert() {
         ShapeKind::Rect,
         LinearRgba::BLACK,
         Point::new(10.0, 10.0),
+        None,
     )
     .unwrap();
     gesture
-        .update(&mut doc, &mut selection, Point::new(40.0, 30.0), NONE)
+        .update(&mut doc, &mut selection, Point::new(40.0, 30.0), NONE, 0.0)
         .unwrap();
     let id = gesture
         .commit(&mut doc, &mut journal, &mut selection)
@@ -429,10 +445,11 @@ fn shape_modifiers_and_click_to_place() {
             ShapeKind::Ellipse,
             LinearRgba::BLACK,
             from.into(),
+            None,
         )
         .unwrap();
         gesture
-            .update(&mut doc, &mut selection, to.into(), modifiers)
+            .update(&mut doc, &mut selection, to.into(), modifiers, 0.0)
             .unwrap();
         let id = gesture
             .commit(&mut doc, &mut journal, &mut selection)
@@ -472,6 +489,7 @@ fn cancelling_a_draw_leaves_no_trace() {
         ShapeKind::Rect,
         LinearRgba::BLACK,
         Point::new(20.0, 20.0),
+        None,
     )
     .unwrap();
     gesture.cancel(&mut doc, &mut selection).unwrap();
@@ -491,7 +509,7 @@ fn marquee_selects_what_it_touches() {
 
     let mut gesture = Gesture::marquee(&selection, Point::new(5.0, -5.0), false);
     gesture
-        .update(&mut doc, &mut selection, Point::new(25.0, 5.0), NONE)
+        .update(&mut doc, &mut selection, Point::new(25.0, 5.0), NONE, 0.0)
         .unwrap();
     assert_eq!(selection.ids(), [a, b]);
     assert_eq!(
@@ -505,7 +523,7 @@ fn marquee_selects_what_it_touches() {
     // Additive: keeps what was selected at the press.
     let mut gesture = Gesture::marquee(&selection, Point::new(45.0, 5.0), true);
     gesture
-        .update(&mut doc, &mut selection, Point::new(46.0, 6.0), NONE)
+        .update(&mut doc, &mut selection, Point::new(46.0, 6.0), NONE, 0.0)
         .unwrap();
     assert_eq!(selection.ids(), [a, b, c]);
 }

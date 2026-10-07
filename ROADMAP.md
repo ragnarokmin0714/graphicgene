@@ -63,7 +63,7 @@ The test of the architecture, in two steps:
    this is a new shell, not a new core. Not started: nothing needs threads
    or a GPU yet.
 
-## v0.5 — editing basics · in progress
+## v0.5 — editing basics · in progress (issue #3's shortcuts next)
 
 Chosen by Roger on 2026-10-06, after v0.4: what anyone reaches for once
 shapes are on the page — like v0.2, many small things rather than one big
@@ -74,7 +74,7 @@ one.
 | ~~Align and distribute~~ | **Done 2026-10-06.** `core::align`: line the selection up by an edge or centre — several layers with each other, one with the artboard — or even out the gaps between three or more. Each layer moves by its box on the page, composed through its parent like a drag, and a group moves as one with anything selected inside it. One batch, one undo step. Buttons at the top of the properties panel. |
 | ~~Stroke styles~~ | **Done 2026-10-07.** Caps (flat, round, square), joins (sharp, round, bevelled) and dashes (a length and a gap) on `Stroke`, set in the stroke section of the panel. tiny-skia draws them and SVG writes them, each only when not the default, so plain strokes are written as before. The project format is version 3: an older build refuses a file rather than drawing its dashes solid and dropping them on the next save. The renderer's damage reach already allowed for the longest miter (four half-widths), and the randomized redraw test now draws sharp triangles and open zigzags with random caps, joins and dashes to hold it to that. |
 | ~~Gradient fills~~ | **Done 2026-10-08.** A fill is a `Paint`: one colour, or a linear or radial gradient of two or more stops, kept in the unit square of the shape's own box so it stretches and turns with the shape — SVG's `objectBoundingBox`, which is how export writes it. A solid fill is written bare, as fills always were, so older files read unchanged. The panel switches a fill between solid, linear and radial (a colour fades out into a gradient; a gradient keeps its first colour when made solid), edits each stop's colour and position, adds a stop in the widest gap in the colour already there (mixed in sRGB, as it is drawn), removes stops down to two, and turns a linear gradient. Owed: handles on the canvas to drag a gradient's ends. |
-| Snapping and smart guides | While moving and drawing, edges and centres snap to other layers' and the artboard's, with guide lines drawn over the canvas. Per-frame: candidates gathered when the drag starts, no allocation while it runs; `pnpm bench` before and after. |
+| ~~Snapping and smart guides~~ | **Done 2026-10-08.** `core::snap`: while a drag moves the selection or draws a shape, its left, centre or right — and top, middle or bottom — catch on other visible layers' and the artboard's within the pick distance, and a guide is drawn along each line caught. The lines are gathered when the drag starts; each move only scans them, allocating nothing (`pnpm bench`: dragging one of 500 shapes 0.12 ms, within this box's variance of before). Holding Ctrl (⌘) skips it for that drag, Ctrl+U (Illustrator's Smart Guides key) or the view menu turns it off. An axis Shift locks stays locked. Owed: scale handles do not snap yet. |
 
 ## Later
 

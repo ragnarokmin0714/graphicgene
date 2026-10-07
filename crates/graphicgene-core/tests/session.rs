@@ -14,6 +14,7 @@ const STROKE: Stroke = Stroke::solid(LinearRgba::BLACK, 2.0);
 const NONE: Modifiers = Modifiers {
     shift: false,
     alt: false,
+    ctrl: false,
 };
 
 fn square(session: &mut Session, x: f64, y: f64) -> NodeId {

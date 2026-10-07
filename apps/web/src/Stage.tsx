@@ -30,6 +30,11 @@ type Props = {
 
 type PointerState = { at: Point } & Keys;
 
+/** The modifiers the core takes from a pointer or key event; ⌘ counts as Ctrl. */
+function keysOf(event: { shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean }): Keys {
+  return { shift: event.shiftKey, alt: event.altKey, ctrl: event.ctrlKey || event.metaKey };
+}
+
 /** Whether a press went to the core, or pans the view — the one thing the page keeps. */
 type DragKind = "core" | "pan";
 
@@ -205,8 +210,8 @@ export function Stage({ editor, revision, run, tool, nextFill }: Props) {
   }, []);
 
   /** Feed a drag position to whatever the press started. */
-  const applyDrag = ({ at, shift, alt }: PointerState) => {
-    run((ed) => ed.pointerMove(at, { shift, alt }));
+  const applyDrag = ({ at, ...keys }: PointerState) => {
+    run((ed) => ed.pointerMove(at, keys));
   };
 
   // Pressing or releasing Shift/Alt mid-drag re-applies the constraint
@@ -220,10 +225,10 @@ export function Stage({ editor, revision, run, tool, nextFill }: Props) {
       const kind = dragging.current;
       const last = lastPointer.current;
       if (!kind || kind === "pan" || !last) return;
-      if (event.key !== "Shift" && event.key !== "Alt") return;
+      if (!["Shift", "Alt", "Control", "Meta"].includes(event.key)) return;
       // Stops Alt from focusing the browser's menu bar on Windows.
       event.preventDefault();
-      lastPointer.current = { at: last.at, shift: event.shiftKey, alt: event.altKey };
+      lastPointer.current = { at: last.at, ...keysOf(event) };
       applyDragRef.current(lastPointer.current);
     };
     window.addEventListener("keydown", onModifier);
@@ -249,8 +254,8 @@ export function Stage({ editor, revision, run, tool, nextFill }: Props) {
     if (event.button !== 0 && !pans) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const p = toScreen(viewportRef.current, event);
-    const { shiftKey: shift, altKey: alt } = event;
-    lastPointer.current = { at: p, shift, alt };
+    const keys = keysOf(event);
+    lastPointer.current = { at: p, ...keys };
 
     if (pans) {
       dragging.current = "pan";
@@ -262,7 +267,7 @@ export function Stage({ editor, revision, run, tool, nextFill }: Props) {
       tool === "select" && mode === null && overlay?.frame && !overlay.locked
         ? handleAt(overlay.frame, p)
         : null;
-    run((ed) => ed.pointerDown(p, { shift, alt }, target, nextFill()));
+    run((ed) => ed.pointerDown(p, keys, target, nextFill()));
     if (target) setCursor(target.cursor);
   };
 
@@ -271,20 +276,20 @@ export function Stage({ editor, revision, run, tool, nextFill }: Props) {
     const kind = dragging.current;
     if (kind === "pan") {
       const last = lastPointer.current?.at ?? p;
-      lastPointer.current = { at: p, shift: event.shiftKey, alt: event.altKey };
+      lastPointer.current = { at: p, ...keysOf(event) };
       run((ed) => ed.panBy(p[0] - last[0], p[1] - last[1]));
       scheduleSettle();
       return;
     }
     if (kind) {
-      lastPointer.current = { at: p, shift: event.shiftKey, alt: event.altKey };
+      lastPointer.current = { at: p, ...keysOf(event) };
       applyDrag(lastPointer.current);
       return;
     }
     if (!core) return;
     // Unpressed, a move only changes the overlay — a hover outline, the
     // pen's preview — so it gets its own tick, not a document revision.
-    if (core.pointerMove(p, { shift: event.shiftKey, alt: event.altKey })) setHoverTick((t) => t + 1);
+    if (core.pointerMove(p, keysOf(event))) setHoverTick((t) => t + 1);
     setCursor(cursorAt(p));
   };
 
@@ -465,6 +470,9 @@ function OverlayLayer({ overlay }: { overlay: Overlay }) {
             className="fill-primary/8 stroke-primary"
           />
         )}
+        {overlay.guides.map(([x0, y0, x1, y1], i) => (
+          <line key={i} x1={x0} y1={y0} x2={x1} y2={y1} strokeWidth={1} className="stroke-rose-500" />
+        ))}
         {overlay.pen && <PenLayer pen={overlay.pen} />}
         {overlay.path && <PathLayer path={overlay.path} />}
       </svg>

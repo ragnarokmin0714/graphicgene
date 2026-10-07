@@ -2,18 +2,23 @@ import { ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MOD, SHIFT } from "@/shortcuts";
 
-export type ZoomActions = {
+/** The view: zoom, and snapping — per-viewer settings the core keeps, never saved. */
+export type ViewActions = {
   zoomIn: () => void;
   zoomOut: () => void;
   zoomTo100: () => void;
   zoomToFit: () => void;
+  snapping: boolean;
+  toggleSnapping: () => void;
 };
 
 type Props = {
@@ -21,7 +26,7 @@ type Props = {
   artboard: { width: number; height: number };
   /** Screen pixels per document unit: 1 is 100%. */
   zoom: number;
-  zoomActions: ZoomActions;
+  viewActions: ViewActions;
   layerCount: number;
   selectionCount: number;
   /** How to use the current tool or mode, when that is not obvious. */
@@ -32,7 +37,7 @@ type Props = {
 export function StatusBar({
   artboard,
   zoom,
-  zoomActions,
+  viewActions,
   layerCount,
   selectionCount,
   hint,
@@ -44,7 +49,7 @@ export function StatusBar({
         {artboard.width} × {artboard.height} px
       </span>
       <span aria-hidden="true" className="bg-border h-3 w-px" />
-      <ZoomMenu zoom={zoom} actions={zoomActions} />
+      <ViewMenu zoom={zoom} actions={viewActions} />
       <span aria-hidden="true" className="bg-border h-3 w-px" />
       <span>
         {layerCount} {layerCount === 1 ? "layer" : "layers"}
@@ -70,7 +75,7 @@ export function StatusBar({
   );
 }
 
-function ZoomMenu({ zoom, actions }: { zoom: number; actions: ZoomActions }) {
+function ViewMenu({ zoom, actions }: { zoom: number; actions: ViewActions }) {
   // Below 10%, a decimal keeps small zooms from all reading "0%" or "1%".
   const percent = zoom < 0.1 ? (zoom * 100).toFixed(1) : String(Math.round(zoom * 100));
   return (
@@ -101,6 +106,12 @@ function ZoomMenu({ zoom, actions }: { zoom: number; actions: ZoomActions }) {
           Zoom to fit
           <DropdownMenuShortcut>{SHIFT} 1</DropdownMenuShortcut>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {/* Hold Ctrl (⌘) during a drag to skip snapping just that once. */}
+        <DropdownMenuCheckboxItem checked={actions.snapping} onCheckedChange={actions.toggleSnapping}>
+          Snap to layers
+          <DropdownMenuShortcut>{MOD} U</DropdownMenuShortcut>
+        </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

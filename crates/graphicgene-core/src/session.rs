@@ -41,6 +41,7 @@ use crate::pen::PenSession;
 use crate::project::Project;
 use crate::properties::{self, Properties, Property, PropertyEdit};
 use crate::selection::Selection;
+use crate::snap::Guide;
 
 use text::TextEdit;
 pub use text::TextView;
@@ -142,6 +143,8 @@ pub struct Overlay {
     /// What the drag in progress does: "move", "scale", "rotate", "create"
     /// or "marquee".
     pub gesture: Option<&'static str>,
+    /// The lines the drag in progress snapped to, one per axis at most.
+    pub guides: [Option<Guide>; 2],
     pub pen: Option<PenView>,
     pub path: Option<EditView>,
     pub text: Option<TextView>,
@@ -181,6 +184,13 @@ pub struct Session {
     glyphs_version: u64,
     /// Bumped whenever a different document is loaded.
     generation: u64,
+    /// Snapping is on unless this is set; a viewer's choice, not saved.
+    snapping_off: bool,
+    /// How near counts as snapping, in document units: the last pointer
+    /// event's pick distance, which follows the zoom.
+    snap_tolerance: f64,
+    /// Ctrl was held at the last pointer event: no snapping for now.
+    snap_held_off: bool,
 }
 
 impl Session {
@@ -516,7 +526,13 @@ impl Session {
         if self.selection_locked()? {
             return Ok(false);
         }
-        self.gesture = Gesture::transform(&self.document, &self.selection, kind, point)?;
+        self.gesture = Gesture::transform(
+            &self.document,
+            &self.selection,
+            kind,
+            point,
+            self.snapping(),
+        )?;
         Ok(self.gesture.is_some())
     }
 
@@ -524,7 +540,15 @@ impl Session {
     pub fn begin_create(&mut self, shape: ShapeKind, fill: LinearRgba, point: Point) -> Result<()> {
         self.cancel_gesture()?;
         self.cancel_property()?;
-        let gesture = Gesture::create(&mut self.document, &mut self.selection, shape, fill, point)?;
+        let snap = (self.snapping() && !self.snap_held_off).then_some(self.snap_tolerance);
+        let gesture = Gesture::create(
+            &mut self.document,
+            &mut self.selection,
+            shape,
+            fill,
+            point,
+            snap,
+        )?;
         self.gesture = Some(gesture);
         Ok(())
     }
@@ -539,7 +563,13 @@ impl Session {
     /// Follow the pointer. A no-op when no gesture is active.
     pub fn update_gesture(&mut self, point: Point, modifiers: Modifiers) -> Result<()> {
         if let Some(gesture) = self.gesture.as_mut() {
-            gesture.update(&mut self.document, &mut self.selection, point, modifiers)?;
+            gesture.update(
+                &mut self.document,
+                &mut self.selection,
+                point,
+                modifiers,
+                self.snap_tolerance,
+            )?;
         }
         Ok(())
     }
@@ -575,7 +605,10 @@ impl Session {
         tolerance: f64,
         stroke: Stroke,
     ) -> Result<()> {
-        let modifiers = Modifiers { shift, alt: false };
+        let modifiers = Modifiers {
+            shift,
+            ..Modifiers::default()
+        };
         match self.pen.as_mut() {
             Some(pen) => pen.press(&mut self.document, point, modifiers, tolerance)?,
             None => {
@@ -593,7 +626,14 @@ impl Session {
 
     pub fn pen_drag(&mut self, point: Point, shift: bool) -> Result<()> {
         if let Some(pen) = self.pen.as_mut() {
-            pen.drag(&mut self.document, point, Modifiers { shift, alt: false })?;
+            pen.drag(
+                &mut self.document,
+                point,
+                Modifiers {
+                    shift,
+                    ..Modifiers::default()
+                },
+            )?;
         }
         Ok(())
     }
@@ -1045,10 +1085,20 @@ impl Session {
             marquee: self.gesture.as_ref().and_then(Gesture::marquee_rect),
             locked: self.selection_locked()?,
             gesture: self.gesture.as_ref().map(Gesture::label),
+            guides: self.gesture.as_ref().map_or([None; 2], Gesture::guides),
             pen: None,
             path: None,
             text: None,
         })
+    }
+
+    /// Whether moving and drawing snap to other layers and the artboard.
+    pub fn snapping(&self) -> bool {
+        !self.snapping_off
+    }
+
+    pub fn set_snapping(&mut self, on: bool) {
+        self.snapping_off = !on;
     }
 
     // ---- Internals -----------------------------------------------------------------

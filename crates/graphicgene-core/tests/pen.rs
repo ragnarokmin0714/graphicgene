@@ -14,14 +14,17 @@ use graphicgene_core::selection::Selection;
 const NONE: Modifiers = Modifiers {
     shift: false,
     alt: false,
+    ctrl: false,
 };
 const SHIFT: Modifiers = Modifiers {
     shift: true,
     alt: false,
+    ctrl: false,
 };
 const ALT: Modifiers = Modifiers {
     shift: false,
     alt: true,
+    ctrl: false,
 };
 const STROKE: Stroke = Stroke::solid(LinearRgba::BLACK, 2.0);
 

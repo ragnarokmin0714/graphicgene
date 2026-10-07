@@ -787,6 +787,31 @@ try {
   while (layerCount() > layersBeforeAlign) await key("z", { ctrlKey: true });
   check(layerCount() === layersBeforeAlign, "undone");
 
+  section("Snapping");
+  const guides = () => surface().querySelectorAll("svg line.stroke-rose-500").length;
+  await key("Escape");
+  await key("r");
+  // Three units off the artboard's centre, (400, 300): it catches there.
+  await pointer("pointerdown", 403, 297);
+  check(guides() === 2, `a guide on each axis while snapped (${guides()})`);
+  // Ctrl held for the rest of the drag: the far corner goes exactly where
+  // the pointer does, whatever lines earlier sections left near it.
+  await pointer("pointermove", 453, 377, { ctrlKey: true });
+  check(guides() === 0, "and none with Ctrl held");
+  await pointer("pointerup", 453, 377, { ctrlKey: true });
+  check(frameOf() === "400 300 53 77", `the press snapped to the centre (${frameOf()})`);
+  check(guides() === 0, "the guides go when the drag ends");
+  await key("u", { ctrlKey: true });
+  await key("r");
+  await pointer("pointerdown", 403, 297);
+  await pointer("pointermove", 453, 377);
+  await pointer("pointerup", 453, 377);
+  check(frameOf() === "403 297 50 80", `Ctrl+U turns snapping off (${frameOf()})`);
+  await key("u", { ctrlKey: true });
+  await key("z", { ctrlKey: true });
+  await key("z", { ctrlKey: true });
+  check(layerCount() === layersBeforeAlign, "undone");
+
   section("Layers panel");
   const layerRows = () => [...document.querySelectorAll('aside[aria-label="Layers"] li')];
   const rowNames = (n = 3) => layerRows().slice(0, n).map((li) => li.textContent).join(",");

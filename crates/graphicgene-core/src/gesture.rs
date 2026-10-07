@@ -19,6 +19,7 @@ use crate::geom::{
 use crate::hit;
 use crate::node::{Node, NodeId};
 use crate::selection::Selection;
+use crate::snap::{Guide, Snapper};
 
 /// A drag shorter than this, in document units, counts as a click. Clicking
 /// with a shape tool places a default-sized shape instead of a sliver.
@@ -39,6 +40,8 @@ pub struct Modifiers {
     /// From the centre: scale or draw around the middle instead of the
     /// opposite edge.
     pub alt: bool,
+    /// Ctrl, or ⌘ on a Mac: no snapping for as long as it is held.
+    pub ctrl: bool,
 }
 
 /// The box a selection is manipulated through: `rect` in frame space, mapped
@@ -168,10 +171,14 @@ enum Kind {
         originals: Vec<Original>,
         /// The document-space change the current pointer position implies.
         delta: Affine,
+        /// For a move with snapping on: what to snap to, and the selection's
+        /// box on the page at the press.
+        snap: Option<(Snapper, Rect)>,
     },
     Create {
         shape: ShapeKind,
         id: NodeId,
+        snapper: Option<Snapper>,
     },
     Marquee {
         additive: bool,
@@ -196,20 +203,37 @@ pub struct Gesture {
     /// The selection at the press, restored on cancel and extended by an
     /// additive marquee.
     base: Vec<NodeId>,
+    /// What the last update snapped to, to draw.
+    guides: [Option<Guide>; 2],
 }
 
 impl Gesture {
     /// Start moving, scaling or rotating the selection. `None` if nothing
-    /// selected has any extent to manipulate.
+    /// selected has any extent to manipulate. A move snaps (see `update`)
+    /// if `snapping`.
     pub fn transform(
         doc: &Document,
         selection: &Selection,
         kind: TransformKind,
         start: Point,
+        snapping: bool,
     ) -> Result<Option<Gesture>> {
         let ids = selection.ids();
         let Some(frame) = Frame::of(doc, ids)? else {
             return Ok(None);
+        };
+        let snap = if snapping && kind == TransformKind::Move {
+            let mut bounds = None;
+            for &id in ids {
+                let b = doc.world_bounds(id)?;
+                bounds = Some(bounds.map_or(b, |a: Rect| a.union(b)));
+            }
+            match bounds {
+                Some(bounds) => Some((Snapper::new(doc, ids)?, bounds)),
+                None => None,
+            }
+        } else {
+            None
         };
         let mut originals = Vec::with_capacity(ids.len());
         for &id in ids {
@@ -225,23 +249,39 @@ impl Gesture {
                 frame,
                 originals,
                 delta: Affine::IDENTITY,
+                snap,
             },
             start,
             current: start,
             base: ids.to_vec(),
+            guides: [None; 2],
         }))
     }
 
     /// Start drawing a new shape from `start`. The node is attached right away
     /// so it renders while being drawn, but it only reaches the journal on
-    /// commit, and it becomes the selection.
+    /// commit, and it becomes the selection. With `snap`, a tolerance, both
+    /// corners snap: the press now, the pointer as it moves.
     pub fn create(
         doc: &mut Document,
         selection: &mut Selection,
         shape: ShapeKind,
         fill: LinearRgba,
         start: Point,
+        snap: Option<f64>,
     ) -> Result<Gesture> {
+        let mut guides = [None; 2];
+        let mut start = start;
+        let snapper = match snap {
+            Some(tolerance) => {
+                let snapper = Snapper::new(doc, &[])?;
+                let snapped = snapper.snap_point(start, tolerance);
+                start += snapped.offset;
+                guides = snapped.guides;
+                Some(snapper)
+            }
+            None => None,
+        };
         let root = doc.root();
         let index = doc.children_of(root)?.len();
         let path = shape.path(Rect::from_points(start, start));
@@ -250,10 +290,11 @@ impl Gesture {
         let base = selection.ids().to_vec();
         selection.set([id]);
         Ok(Gesture {
-            kind: Kind::Create { shape, id },
+            kind: Kind::Create { shape, id, snapper },
             start,
             current: start,
             base,
+            guides,
         })
     }
 
@@ -265,31 +306,61 @@ impl Gesture {
             start,
             current: start,
             base: selection.ids().to_vec(),
+            guides: [None; 2],
         }
     }
 
     /// Follow the pointer to `point`, previewing the result in the document.
+    /// A move or a new shape snaps to lines within `tolerance` (document
+    /// units) unless Ctrl is held; an axis Shift locks stays locked.
     pub fn update(
         &mut self,
         doc: &mut Document,
         selection: &mut Selection,
         point: Point,
         modifiers: Modifiers,
+        tolerance: f64,
     ) -> Result<()> {
         self.current = point;
+        self.guides = [None; 2];
         match &mut self.kind {
             Kind::Transform {
                 kind,
                 frame,
                 originals,
                 delta,
+                snap,
             } => {
                 *delta = transform_delta(*kind, frame, self.start, point, modifiers);
+                if let Some((snapper, bounds)) = snap
+                    && !modifiers.ctrl
+                {
+                    let d = delta.translation();
+                    let mut snapped = snapper.snap_box(*bounds + d, tolerance);
+                    if modifiers.shift && d.x == 0.0 {
+                        snapped.offset.x = 0.0;
+                        snapped.guides[0] = None;
+                    }
+                    if modifiers.shift && d.y == 0.0 {
+                        snapped.offset.y = 0.0;
+                        snapped.guides[1] = None;
+                    }
+                    *delta = Affine::translate(d + snapped.offset);
+                    self.guides = snapped.guides;
+                }
                 for original in originals.iter() {
                     doc.get_mut(original.id)?.common.transform = moved(original, *delta);
                 }
             }
-            Kind::Create { shape, id } => {
+            Kind::Create { shape, id, snapper } => {
+                let mut point = point;
+                if let Some(snapper) = snapper
+                    && !modifiers.ctrl
+                {
+                    let snapped = snapper.snap_point(point, tolerance);
+                    point += snapped.offset;
+                    self.guides = snapped.guides;
+                }
                 let rect = drawn_rect(self.start, point, modifiers);
                 doc.write_path(*id, shape.path(rect))?;
             }
@@ -335,7 +406,7 @@ impl Gesture {
                 }
                 Ok(None)
             }
-            Kind::Create { shape, id } => {
+            Kind::Create { shape, id, .. } => {
                 if !dragged {
                     let size = (DEFAULT_SHAPE_SIZE, DEFAULT_SHAPE_SIZE);
                     doc.write_path(id, shape.path(Rect::from_origin_size(self.start, size)))?;
@@ -378,6 +449,11 @@ impl Gesture {
             Kind::Transform { frame, delta, .. } => Some(frame.then(*delta)),
             _ => None,
         }
+    }
+
+    /// The guides for what the last update snapped to.
+    pub fn guides(&self) -> [Option<Guide>; 2] {
+        self.guides
     }
 
     /// The marquee rectangle, while one is being swept.

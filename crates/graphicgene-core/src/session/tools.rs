@@ -86,6 +86,8 @@ impl Session {
         color: LinearRgba,
     ) -> Result<()> {
         self.pointer_cancel()?;
+        self.snap_tolerance = at.pick_tolerance;
+        self.snap_held_off = at.modifiers.ctrl;
         let Pointer {
             point, modifiers, ..
         } = at;
@@ -145,6 +147,8 @@ impl Session {
     /// it tracks what is under it. Returns whether that changed anything
     /// drawn over the artwork — always, while pressed.
     pub fn pointer_move(&mut self, at: Pointer) -> Result<bool> {
+        self.snap_tolerance = at.pick_tolerance;
+        self.snap_held_off = at.modifiers.ctrl;
         let Pointer {
             point, modifiers, ..
         } = at;
