@@ -178,3 +178,51 @@ fn stroke_styles_are_written_when_not_svg_defaults() {
         "{svg}"
     );
 }
+
+#[test]
+fn gradients_are_written_in_the_shapes_box_each_with_its_own_id() {
+    use graphicgene_core::paint::{ColorStop, Gradient, GradientKind, Paint};
+
+    let mut doc = Document::new();
+    let mut journal = Journal::new();
+    let root = doc.root();
+    for (name, kind) in [("Lin", GradientKind::Linear), ("Rad", GradientKind::Radial)] {
+        let mut node = Node::vector(name, square(), None);
+        if let NodeKind::Vector(v) = &mut node.kind {
+            v.fill = Some(Paint::Gradient(Gradient::new(
+                kind,
+                vec![
+                    ColorStop {
+                        offset: 0.0,
+                        color: LinearRgba::BLACK,
+                    },
+                    ColorStop {
+                        offset: 1.0,
+                        color: LinearRgba::new(1.0, 1.0, 1.0, 0.5),
+                    },
+                ],
+            )));
+        }
+        insert(&mut doc, &mut journal, root, node);
+    }
+    let svg = to_svg(&doc).unwrap();
+    assert!(
+        svg.contains(r#"<linearGradient id="gradient-1" x1="0" y1="0.5" x2="1" y2="0.5">"#),
+        "{svg}"
+    );
+    assert!(
+        svg.contains(r#"<radialGradient id="gradient-2" cx="0.5" cy="0.5" r="0.5">"#),
+        "{svg}"
+    );
+    assert!(
+        svg.contains(r##"<stop offset="0" stop-color="#000000"/>"##),
+        "{svg}"
+    );
+    // Alpha goes out at 8 bits, as fills' does: 0.5 is 128/255.
+    assert!(
+        svg.contains(r##"<stop offset="1" stop-color="#ffffff" stop-opacity="0.502"/>"##),
+        "{svg}"
+    );
+    assert!(svg.contains(r#"data-name="Lin" d="#) && svg.contains(r#"fill="url(#gradient-1)""#));
+    assert!(svg.contains(r#"fill="url(#gradient-2)""#), "{svg}");
+}

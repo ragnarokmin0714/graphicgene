@@ -6,7 +6,8 @@ use graphicgene_core::command::Command;
 use graphicgene_core::geom::{Affine, Point, Rect, Shape, Vec2};
 use graphicgene_core::gesture::{Frame, TransformKind};
 use graphicgene_core::node::{LineCap, LineJoin, Node, NodeId, Stroke};
-use graphicgene_core::properties::{Properties, Property, Shared};
+use graphicgene_core::paint::{Gradient, GradientKind, Paint};
+use graphicgene_core::properties::{FillKind, Properties, Property, Shared};
 use graphicgene_core::session::Session;
 
 const RED: LinearRgba = LinearRgba::new(1.0, 0.0, 0.0, 1.0);
@@ -69,7 +70,10 @@ fn the_panel_reads_what_the_selection_shares() {
     assert_eq!(p.count, 1);
     assert_frame(&p, 10.0, 20.0, 100.0, 50.0, 0.0);
     assert_eq!(p.opacity, Shared::Same(1.0));
-    assert_eq!(p.fill, Some(Shared::Same(Some(LinearRgba::BLACK))));
+    assert_eq!(
+        p.fill,
+        Some(Shared::Same(Some(Paint::Solid(LinearRgba::BLACK))))
+    );
     assert_eq!(p.stroke, Some(Shared::Same(None)));
     assert_eq!(p.stroke_width, None, "nothing is stroked");
 
@@ -343,7 +347,7 @@ fn fill_and_opacity() {
     session.undo().unwrap();
     assert_eq!(
         props(&session).fill,
-        Some(Shared::Same(Some(LinearRgba::BLACK)))
+        Some(Shared::Same(Some(Paint::Solid(LinearRgba::BLACK))))
     );
 }
 
@@ -452,4 +456,170 @@ fn stroke_style_changes_strokes_only_and_keeps_through_a_recolour() {
     // One undo step each: back through the solid gap to the dashed line.
     session.undo().unwrap();
     assert_eq!(props(&session).stroke_gap, Some(Shared::Same(1.5)));
+}
+
+fn fill_of(session: &Session, id: NodeId) -> Option<Paint> {
+    match &session.document().get(id).unwrap().kind {
+        graphicgene_core::node::NodeKind::Vector(v) => v.fill.clone(),
+        _ => unreachable!(),
+    }
+}
+
+fn gradient_of(session: &Session, id: NodeId) -> Gradient {
+    match fill_of(session, id) {
+        Some(Paint::Gradient(gradient)) => gradient,
+        other => panic!("not a gradient: {other:?}"),
+    }
+}
+
+#[test]
+fn a_fill_becomes_a_gradient_and_back() {
+    let mut session = Session::new();
+    let a = rect(&mut session, 0.0, 0.0, 10.0, 10.0);
+    select(&mut session, &[a]);
+    session.set_property(Property::Fill(Some(RED))).unwrap();
+
+    // A colour fades to clear, left to right.
+    session
+        .set_property(Property::FillKind(FillKind::Linear))
+        .unwrap();
+    let g = gradient_of(&session, a);
+    assert_eq!(g.kind, GradientKind::Linear);
+    assert_eq!(g.stops.len(), 2);
+    assert_eq!((g.stops[0].color, g.stops[1].color.a), (RED, 0.0));
+    assert_eq!(g.angle(), 0.0);
+
+    // The other kind keeps the stops; solid keeps the first colour.
+    session
+        .set_property(Property::FillStopColor {
+            index: 1,
+            color: LinearRgba::BLACK,
+        })
+        .unwrap();
+    session
+        .set_property(Property::FillKind(FillKind::Radial))
+        .unwrap();
+    let g = gradient_of(&session, a);
+    assert_eq!(g.kind, GradientKind::Radial);
+    assert_eq!(g.stops[1].color, LinearRgba::BLACK);
+    session
+        .set_property(Property::FillKind(FillKind::Solid))
+        .unwrap();
+    assert_eq!(fill_of(&session, a), Some(Paint::Solid(RED)));
+    assert!(
+        !session
+            .set_property(Property::FillKind(FillKind::Solid))
+            .unwrap(),
+        "already solid: no step"
+    );
+
+    // Each was one step.
+    for _ in 0..3 {
+        session.undo().unwrap();
+    }
+    assert_eq!(gradient_of(&session, a).stops[1].color.a, 0.0);
+}
+
+#[test]
+fn gradient_stops_move_within_their_neighbours_and_come_and_go() {
+    let mut session = Session::new();
+    let a = rect(&mut session, 0.0, 0.0, 10.0, 10.0);
+    let unfilled = rect(&mut session, 20.0, 0.0, 10.0, 10.0);
+    select(&mut session, &[unfilled]);
+    session.set_property(Property::Fill(None)).unwrap();
+    select(&mut session, &[a]);
+    session.set_property(Property::Fill(Some(RED))).unwrap();
+    session
+        .set_property(Property::FillKind(FillKind::Linear))
+        .unwrap();
+    session
+        .set_property(Property::FillStopColor {
+            index: 1,
+            color: LinearRgba::WHITE,
+        })
+        .unwrap();
+
+    // A new stop lands in the widest gap in the colour already there,
+    // mixed as the renderer mixes: in sRGB, where red to white at halfway
+    // is (255, 127.5, 127.5) — not the linear mean, which is (255, 188, 188).
+    session.set_property(Property::AddFillStop).unwrap();
+    let g = gradient_of(&session, a);
+    assert_eq!(g.stops.len(), 3);
+    assert_eq!(g.stops[1].offset, 0.5);
+    let [r, green, blue, alpha] = g.stops[1].color.to_srgb8();
+    assert!(r == 255 && alpha == 255 && green == blue && (127..=128).contains(&green));
+
+    // Offsets stay between the neighbours'; nonsense changes nothing.
+    session
+        .set_property(Property::FillStopOffset {
+            index: 1,
+            offset: 1.5,
+        })
+        .unwrap();
+    assert_eq!(gradient_of(&session, a).stops[1].offset, 1.0);
+    session
+        .set_property(Property::FillStopOffset {
+            index: 1,
+            offset: -3.0,
+        })
+        .unwrap();
+    assert_eq!(gradient_of(&session, a).stops[1].offset, 0.0);
+    assert!(
+        !session
+            .set_property(Property::FillStopOffset {
+                index: 1,
+                offset: f64::NAN
+            })
+            .unwrap()
+    );
+    assert!(
+        !session
+            .set_property(Property::FillStopOffset {
+                index: 9,
+                offset: 0.5
+            })
+            .unwrap()
+    );
+
+    // Down to two stops, and no further.
+    session.set_property(Property::RemoveFillStop(1)).unwrap();
+    assert_eq!(gradient_of(&session, a).stops.len(), 2);
+    assert!(!session.set_property(Property::RemoveFillStop(0)).unwrap());
+
+    // Turning a linear gradient keeps its length about its middle.
+    session.set_property(Property::FillAngle(90.0)).unwrap();
+    let g = gradient_of(&session, a);
+    assert!((g.angle() - 90.0).abs() < 1e-9);
+    assert!((g.start.x - 0.5).abs() < 1e-9 && (g.start.y - 1.0).abs() < 1e-9);
+    assert!((g.end.y - 0.0).abs() < 1e-9);
+
+    // The unfilled one was never touched.
+    assert_eq!(fill_of(&session, unfilled), None);
+}
+
+#[test]
+fn a_gradient_edit_previews_and_commits_as_one_step() {
+    let mut session = Session::new();
+    let a = rect(&mut session, 0.0, 0.0, 10.0, 10.0);
+    select(&mut session, &[a]);
+    session.set_property(Property::Fill(Some(RED))).unwrap();
+    session
+        .set_property(Property::FillKind(FillKind::Linear))
+        .unwrap();
+    for x in [0.1, 0.2, 0.3] {
+        session
+            .preview_property(Property::FillStopColor {
+                index: 0,
+                color: LinearRgba::new(x, x, x, 1.0),
+            })
+            .unwrap();
+    }
+    assert!(session.commit_property().unwrap());
+    assert_eq!(gradient_of(&session, a).stops[0].color.r, 0.3);
+    session.undo().unwrap();
+    assert_eq!(
+        gradient_of(&session, a).stops[0].color,
+        RED,
+        "one step for the whole drag"
+    );
 }

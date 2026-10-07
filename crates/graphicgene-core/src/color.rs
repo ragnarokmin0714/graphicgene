@@ -48,6 +48,22 @@ impl LinearRgba {
     }
 }
 
+/// `a` and `b` mixed, `t` of the way to `b`, in sRGB-encoded values with
+/// straight alpha — the space gradients are drawn in, by the renderer and in
+/// SVG — so a colour found this way matches what a gradient shows there.
+pub fn mix_srgb(a: LinearRgba, b: LinearRgba, t: f32) -> LinearRgba {
+    let channel = |x: f32, y: f32| {
+        let (x, y) = (linear_to_srgb(x), linear_to_srgb(y));
+        srgb_to_linear(x + (y - x) * t)
+    };
+    LinearRgba {
+        r: channel(a.r, b.r),
+        g: channel(a.g, b.g),
+        b: channel(a.b, b.b),
+        a: a.a + (b.a - a.a) * t,
+    }
+}
+
 fn encode(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
 }

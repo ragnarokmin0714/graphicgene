@@ -727,6 +727,37 @@ try {
   check(status().includes("1 selected"), "without deselecting");
   await checkScreen("after the colour picker");
 
+  section("Gradients");
+  const fillType = () => pressedIn("Fill type");
+  check(fillType() === "Solid fill" && value("Fill hex") === "00FF00", "a fill starts solid");
+  await press(button("Linear gradient"));
+  check(
+    fillType() === "Linear gradient" &&
+      value("Stop 1 hex") === "00FF00" &&
+      value("Stop 2 hex") === "00FF00" &&
+      value("Stop 2 position") === "100",
+    "a colour becomes a gradient fading out from it",
+  );
+  await typeInto("Gradient angle", "90");
+  check(value("Gradient angle") === "90", "a linear gradient turns");
+  await press(button("Add stop"));
+  check(value("Stop 2 position") === "50" && !!button("Remove stop 3"), "a stop is added in the middle");
+  await typeInto("Stop 2 hex", "FF0000");
+  check(value("Stop 2 hex") === "FF0000", "a stop takes a colour");
+  await typeInto("Stop 2 position", "120");
+  check(value("Stop 2 position") === "100", "and stays between its neighbours");
+  await checkScreen("with a gradient fill");
+  await press(button("Remove stop 2"));
+  check(!button("Remove stop 1") && !!field("Stop 2 hex"), "back to two stops, which stay");
+  await press(button("Radial gradient"));
+  check(fillType() === "Radial gradient" && !field("Gradient angle"), "radial keeps the stops, and has no angle");
+  await checkScreen("with a radial gradient");
+  await press(button("Solid fill"));
+  check(fillType() === "Solid fill" && value("Fill hex") === "00FF00", "solid again keeps the first colour");
+  await key("z", { ctrlKey: true });
+  check(fillType() === "Radial gradient", "each one undo step");
+  await key("z", { ctrlKey: true, shiftKey: true });
+
   section("Align");
   const layersBeforeAlign = layerCount();
   await key("Escape");

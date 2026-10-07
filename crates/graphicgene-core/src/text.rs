@@ -26,6 +26,7 @@ use ttf_parser::{Face, GlyphId, OutlineBuilder, Tag};
 
 use crate::color::LinearRgba;
 use crate::fonts::Fonts;
+use crate::paint::Paint;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -62,7 +63,7 @@ impl Default for TextStyle {
 pub struct TextNode {
     pub content: String,
     pub style: TextStyle,
-    pub fill: Option<LinearRgba>,
+    pub fill: Option<Paint>,
     /// Outlines and the text box, from the layout pass. Not saved: they
     /// follow from the content, the style and the fonts at hand.
     #[serde(skip)]
@@ -73,11 +74,12 @@ pub struct TextNode {
 }
 
 impl TextNode {
+    /// Text in one colour, or none.
     pub fn new(content: impl Into<String>, style: TextStyle, fill: Option<LinearRgba>) -> Self {
         Self {
             content: content.into(),
             style,
-            fill,
+            fill: fill.map(Paint::Solid),
             layout: None,
             layout_key: 0,
         }

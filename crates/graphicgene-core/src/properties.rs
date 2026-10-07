@@ -20,6 +20,7 @@ use crate::error::Result;
 use crate::geom::{Affine, Vec2};
 use crate::gesture::Frame;
 use crate::node::{Dash, LineCap, LineJoin, Node, NodeId, NodeKind, Stroke, VectorNode};
+use crate::paint::{ColorStop, Gradient, GradientKind, Paint};
 use crate::text::{TextAlign, TextNode, TextStyle};
 
 /// The smallest width or height a field can set, in document units: a frame
@@ -66,9 +67,9 @@ pub struct Properties {
     /// nodes, whose shared frame is axis-aligned.
     pub rotation: f64,
     pub opacity: Shared<f32>,
-    /// The fill colour, `Same(None)` for no fill. `None` when nothing
-    /// selected has paint: groups only.
-    pub fill: Option<Shared<Option<LinearRgba>>>,
+    /// The fill, `Same(None)` for none. `None` when nothing selected has
+    /// paint: groups only.
+    pub fill: Option<Shared<Option<Paint>>>,
     /// The stroke colour, `Same(None)` for no stroke, and `None` for groups
     /// only, as for `fill`.
     pub stroke: Option<Shared<Option<LinearRgba>>>,
@@ -92,6 +93,14 @@ pub struct TextProperties {
     pub align: Shared<TextAlign>,
 }
 
+/// What a fill can be made, in the panel's terms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillKind {
+    Solid,
+    Linear,
+    Radial,
+}
+
 /// One change the panel can make.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Property {
@@ -102,7 +111,32 @@ pub enum Property {
     /// Degrees, counter-clockwise.
     Rotation(f64),
     Opacity(f32),
+    /// Fill with one colour, or remove the fill.
     Fill(Option<LinearRgba>),
+    /// Make the fills there are solid or a gradient; none are added. A
+    /// colour becomes a gradient fading from it to clear, a gradient
+    /// becomes its first colour, and a gradient of the other kind keeps its
+    /// stops.
+    FillKind(FillKind),
+    /// A gradient fill's stop, by index: its colour.
+    FillStopColor {
+        index: usize,
+        color: LinearRgba,
+    },
+    /// A gradient fill's stop, by index: its offset, kept between its
+    /// neighbours' so the stops stay in order.
+    FillStopOffset {
+        index: usize,
+        offset: f64,
+    },
+    /// A linear gradient fill's direction: degrees counter-clockwise from
+    /// pointing right, in the shape's box.
+    FillAngle(f64),
+    /// A new stop in the middle of the widest gap, in the colour already
+    /// shown there.
+    AddFillStop,
+    /// Remove a stop by index, if more than two would be left.
+    RemoveFillStop(usize),
     /// Set or remove the whole stroke.
     Stroke(Option<Stroke>),
     /// Recolour strokes, keeping each one's width; paths without a stroke
@@ -158,8 +192,8 @@ pub fn properties(doc: &Document, ids: &[NodeId]) -> Result<Option<Properties>> 
         .collect();
     let fills = vectors
         .iter()
-        .map(|v| v.fill)
-        .chain(texts.iter().map(|t| t.fill));
+        .map(|v| v.fill.clone())
+        .chain(texts.iter().map(|t| t.fill.clone()));
     let strokes = || vectors.iter().filter_map(|v| v.stroke);
     let text = (!texts.is_empty()).then(|| TextProperties {
         family: Shared::of(texts.iter().map(|t| t.style.family.clone())).expect("some text"),
@@ -200,11 +234,11 @@ struct Snapshot {
 enum Look {
     Group,
     Vector {
-        fill: Option<LinearRgba>,
+        fill: Option<Paint>,
         stroke: Option<Stroke>,
     },
     Text {
-        fill: Option<LinearRgba>,
+        fill: Option<Paint>,
         style: TextStyle,
     },
 }
@@ -214,11 +248,11 @@ impl Look {
         match &node.kind {
             NodeKind::Group(_) => Look::Group,
             NodeKind::Vector(v) => Look::Vector {
-                fill: v.fill,
+                fill: v.fill.clone(),
                 stroke: v.stroke,
             },
             NodeKind::Text(t) => Look::Text {
-                fill: t.fill,
+                fill: t.fill.clone(),
                 style: t.style.clone(),
             },
         }
@@ -272,7 +306,8 @@ impl PropertyEdit {
             match (&node.kind, &snapshot.kind) {
                 (NodeKind::Vector(v), Look::Vector { fill, stroke }) => {
                     if v.fill != *fill {
-                        commands.push(Command::SetFill { id, fill: v.fill });
+                        let fill = v.fill.clone();
+                        commands.push(Command::SetFill { id, fill });
                     }
                     if v.stroke != *stroke {
                         commands.push(Command::SetStroke {
@@ -283,7 +318,8 @@ impl PropertyEdit {
                 }
                 (NodeKind::Text(t), Look::Text { fill, style }) => {
                     if t.fill != *fill {
-                        commands.push(Command::SetFill { id, fill: t.fill });
+                        let fill = t.fill.clone();
+                        commands.push(Command::SetFill { id, fill });
                     }
                     if t.style != *style {
                         let style = t.style.clone();
@@ -313,11 +349,11 @@ impl PropertyEdit {
             node.common.opacity = snapshot.opacity;
             match (&mut node.kind, &snapshot.kind) {
                 (NodeKind::Vector(v), Look::Vector { fill, stroke }) => {
-                    v.fill = *fill;
+                    v.fill.clone_from(fill);
                     v.stroke = *stroke;
                 }
                 (NodeKind::Text(t), Look::Text { fill, style }) => {
-                    t.fill = *fill;
+                    t.fill.clone_from(fill);
                     t.style.clone_from(style);
                 }
                 _ => {}
@@ -351,10 +387,68 @@ fn apply(doc: &mut Document, ids: &[NodeId], property: &Property) -> Result<()> 
                 doc.get_mut(id)?.common.opacity = opacity;
             }
         }
-        Property::Fill(fill) => {
-            paint(doc, ids, |v| v.fill = fill)?;
-            text(doc, ids, |t| t.fill = fill)?;
+        Property::Fill(color) => {
+            let fill = color.map(Paint::Solid);
+            paint(doc, ids, |v| v.fill.clone_from(&fill))?;
+            text(doc, ids, |t| t.fill.clone_from(&fill))?;
         }
+        Property::FillKind(kind) => fills(doc, ids, |fill| {
+            let made = match (kind, &*fill) {
+                (FillKind::Solid, Paint::Solid(_)) => return,
+                (FillKind::Solid, paint) => Paint::Solid(paint.first_color()),
+                (FillKind::Linear, Paint::Gradient(g)) if g.kind == GradientKind::Linear => return,
+                (FillKind::Radial, Paint::Gradient(g)) if g.kind == GradientKind::Radial => return,
+                (_, paint) => {
+                    let kind = if kind == FillKind::Linear {
+                        GradientKind::Linear
+                    } else {
+                        GradientKind::Radial
+                    };
+                    Paint::Gradient(match paint {
+                        Paint::Solid(color) => Gradient::fading(kind, *color),
+                        Paint::Gradient(g) => Gradient::new(kind, g.stops.clone()),
+                    })
+                }
+            };
+            *fill = made;
+        })?,
+        Property::FillStopColor { index, color } => gradients(doc, ids, |g| {
+            if let Some(stop) = g.stops.get_mut(index) {
+                stop.color = color;
+            }
+        })?,
+        Property::FillStopOffset { index, offset } if offset.is_finite() => {
+            gradients(doc, ids, |g| {
+                if index >= g.stops.len() {
+                    return;
+                }
+                let low = index.checked_sub(1).map_or(0.0, |i| g.stops[i].offset);
+                let high = g.stops.get(index + 1).map_or(1.0, |s| s.offset);
+                g.stops[index].offset = offset.clamp(low, high);
+            })?;
+        }
+        Property::FillAngle(degrees) if degrees.is_finite() => gradients(doc, ids, |g| {
+            if g.kind == GradientKind::Linear {
+                g.set_angle(degrees);
+            }
+        })?,
+        Property::AddFillStop => gradients(doc, ids, |g| {
+            let widest = (0..g.stops.len() - 1)
+                .max_by(|&a, &b| {
+                    let gap = |i: usize| g.stops[i + 1].offset - g.stops[i].offset;
+                    gap(a).total_cmp(&gap(b))
+                })
+                .unwrap_or(0);
+            let offset = (g.stops[widest].offset + g.stops[widest + 1].offset) / 2.0;
+            let color = g.color_at(offset);
+            g.stops.insert(widest + 1, ColorStop { offset, color });
+        })?,
+        Property::RemoveFillStop(index) => gradients(doc, ids, |g| {
+            if g.stops.len() > 2 && index < g.stops.len() {
+                g.stops.remove(index);
+            }
+        })?,
+        Property::FillStopOffset { .. } | Property::FillAngle(_) => {}
         Property::Stroke(stroke) => paint(doc, ids, |v| v.stroke = stroke)?,
         Property::StrokeColor(color) => paint(doc, ids, |v| {
             v.stroke = Some(match v.stroke {
@@ -407,6 +501,35 @@ fn apply(doc: &mut Document, ids: &[NodeId], property: &Property) -> Result<()> 
         Property::FontSize(_) | Property::LineHeight(_) => {}
     }
     Ok(())
+}
+
+/// Change the fills there are, of shapes and text; none are added.
+fn fills(doc: &mut Document, ids: &[NodeId], mut change: impl FnMut(&mut Paint)) -> Result<()> {
+    for &id in ids {
+        match &mut doc.get_mut(id)?.kind {
+            NodeKind::Vector(VectorNode {
+                fill: Some(fill), ..
+            })
+            | NodeKind::Text(TextNode {
+                fill: Some(fill), ..
+            }) => change(fill),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Change the gradient fills there are.
+fn gradients(
+    doc: &mut Document,
+    ids: &[NodeId],
+    mut change: impl FnMut(&mut Gradient),
+) -> Result<()> {
+    fills(doc, ids, |fill| {
+        if let Paint::Gradient(gradient) = fill {
+            change(gradient);
+        }
+    })
 }
 
 /// Change the strokes there are; paths without one are left alone.

@@ -17,15 +17,17 @@
 //! edge exactly as a full redraw draws it; the cost stays proportional to
 //! the items touched, since the rest of the scratch is never read. The
 //! scratch buffer and the path builder are reused, so a steady drag
-//! allocates nothing here once warmed up — except a dashed stroke's pattern,
-//! which tiny-skia takes as a `Vec`.
+//! allocates nothing here once warmed up — except a dashed stroke's pattern
+//! and a gradient's stops, which tiny-skia takes as `Vec`s.
 
 use graphicgene_core::color::LinearRgba;
-use graphicgene_core::geom::{Affine, Bounds, PathEl};
+use graphicgene_core::geom::{Affine, Bounds, PathEl, Point};
 use graphicgene_core::node::{LineCap, LineJoin};
+use graphicgene_core::paint::{Gradient, GradientKind, Paint as Fill};
 use tiny_skia::{
-    Color, FillRule, LineCap as SkLineCap, LineJoin as SkLineJoin, Paint, PathBuilder, Pixmap,
-    PixmapMut, Rect as SkRect, Stroke as SkStroke, StrokeDash, Transform,
+    Color, FillRule, GradientStop, LineCap as SkLineCap, LineJoin as SkLineJoin, LinearGradient,
+    Paint, PathBuilder, Pixmap, PixmapMut, Point as SkPoint, RadialGradient, Rect as SkRect,
+    Shader, SpreadMode, Stroke as SkStroke, StrokeDash, Transform,
 };
 
 use crate::RenderError;
@@ -289,12 +291,17 @@ fn draw(builder: &mut PathBuilder, item: &RenderItem, view: Affine, canvas: &mut
     // f32 rounding of two separate transforms.
     let transform = to_sk_transform(view * item.transform);
 
-    if let Some(fill) = item.fill {
+    if let Some(fill) = &item.fill {
         let mut paint = Paint {
             anti_alias: true,
             ..Default::default()
         };
-        paint.set_color(to_sk_color(fill, item.opacity));
+        match fill {
+            Fill::Solid(color) => paint.set_color(to_sk_color(*color, item.opacity)),
+            Fill::Gradient(gradient) => {
+                paint.shader = gradient_shader(gradient, item.paint_box, item.opacity);
+            }
+        }
         canvas.fill_path(&path, &paint, FillRule::Winding, transform, None);
     }
 
@@ -337,6 +344,44 @@ fn to_sk_transform(affine: Affine) -> Transform {
 
 /// tiny-skia works in 8-bit sRGB; the document works in linear f32.
 /// This conversion is the boundary, and it only ever runs outward.
+/// A gradient as tiny-skia draws it. The gradient lives in the unit square
+/// of the path's box; the shader's transform stretches that square over the
+/// box, and the fill's transform takes it on to the device, as it does the
+/// path. Its stops are the one allocation in such a draw.
+///
+/// A box with no width or height cannot hold a gradient, and tiny-skia
+/// declines one there; the last colour fills it instead, which is what
+/// tiny-skia does for any gradient that collapses to a point.
+fn gradient_shader(gradient: &Gradient, paint_box: Bounds, opacity: f32) -> Shader<'static> {
+    let stops: Vec<GradientStop> = gradient
+        .stops
+        .iter()
+        .map(|stop| GradientStop::new(stop.offset as f32, to_sk_color(stop.color, opacity)))
+        .collect();
+    let last = gradient
+        .stops
+        .last()
+        .map_or(LinearRgba::TRANSPARENT, |s| s.color);
+    let unit = Transform::from_row(
+        paint_box.width() as f32,
+        0.0,
+        0.0,
+        paint_box.height() as f32,
+        paint_box.x0 as f32,
+        paint_box.y0 as f32,
+    );
+    let point = |p: Point| SkPoint::from_xy(p.x as f32, p.y as f32);
+    let (start, end) = (point(gradient.start), point(gradient.end));
+    let shader = match gradient.kind {
+        GradientKind::Linear => LinearGradient::new(start, end, stops, SpreadMode::Pad, unit),
+        GradientKind::Radial => {
+            let radius = (gradient.end - gradient.start).hypot() as f32;
+            RadialGradient::new(start, 0.0, start, radius, stops, SpreadMode::Pad, unit)
+        }
+    };
+    shader.unwrap_or(Shader::SolidColor(to_sk_color(last, opacity)))
+}
+
 fn to_sk_color(color: LinearRgba, opacity: f32) -> tiny_skia::Color {
     let [r, g, b, a] = LinearRgba {
         a: color.a * opacity.clamp(0.0, 1.0),

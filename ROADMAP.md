@@ -73,7 +73,7 @@ one.
 |---|---|
 | ~~Align and distribute~~ | **Done 2026-10-06.** `core::align`: line the selection up by an edge or centre — several layers with each other, one with the artboard — or even out the gaps between three or more. Each layer moves by its box on the page, composed through its parent like a drag, and a group moves as one with anything selected inside it. One batch, one undo step. Buttons at the top of the properties panel. |
 | ~~Stroke styles~~ | **Done 2026-10-07.** Caps (flat, round, square), joins (sharp, round, bevelled) and dashes (a length and a gap) on `Stroke`, set in the stroke section of the panel. tiny-skia draws them and SVG writes them, each only when not the default, so plain strokes are written as before. The project format is version 3: an older build refuses a file rather than drawing its dashes solid and dropping them on the next save. The renderer's damage reach already allowed for the longest miter (four half-widths), and the randomized redraw test now draws sharp triangles and open zigzags with random caps, joins and dashes to hold it to that. |
-| Gradient fills | Linear and radial, with colour stops, in the box of the shape so they follow its transform. Fill becomes a paint (solid or gradient) in the model, the panel, SVG and the renderer. |
+| ~~Gradient fills~~ | **Done 2026-10-08.** A fill is a `Paint`: one colour, or a linear or radial gradient of two or more stops, kept in the unit square of the shape's own box so it stretches and turns with the shape — SVG's `objectBoundingBox`, which is how export writes it. A solid fill is written bare, as fills always were, so older files read unchanged. The panel switches a fill between solid, linear and radial (a colour fades out into a gradient; a gradient keeps its first colour when made solid), edits each stop's colour and position, adds a stop in the widest gap in the colour already there (mixed in sRGB, as it is drawn), removes stops down to two, and turns a linear gradient. Owed: handles on the canvas to drag a gradient's ends. |
 | Snapping and smart guides | While moving and drawing, edges and centres snap to other layers' and the artboard's, with guide lines drawn over the canvas. Per-frame: candidates gathered when the drag starts, no allocation while it runs; `pnpm bench` before and after. |
 
 ## Later
@@ -108,9 +108,10 @@ Known and deliberate, roughly in the order it will start to hurt.
    insertion.
 5. **Unbounded undo history.** `SetPath` stores whole paths. Cap or coalesce
    it when memory shows the need.
-6. **Per-frame leftovers.** Each refreshed item clones its path, the overlay
-   crosses the boundary as JSON, and every draw converts its path to
-   tiny-skia's type. None shows in `pnpm bench` today; measure before
+6. **Per-frame leftovers.** Each refreshed item clones its path (and a
+   gradient's stops), the overlay crosses the boundary as JSON, and every
+   draw converts its path to tiny-skia's type — and a dashed stroke's
+   pattern or a gradient's stops, which tiny-skia takes as `Vec`s. None shows in `pnpm bench` today; measure before
    changing any of them.
 7. **Zooming redraws everything.** About 19 ms a frame for a 1440×900
    viewport at 2x with 500 shapes — roughly 50 fps. Showing a scaled copy of

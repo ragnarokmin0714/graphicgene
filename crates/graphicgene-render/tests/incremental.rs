@@ -5,8 +5,9 @@
 
 use graphicgene_core::color::LinearRgba;
 use graphicgene_core::doc::Document;
-use graphicgene_core::geom::{Affine, BezPath, Ellipse, Rect, Shape};
+use graphicgene_core::geom::{Affine, BezPath, Ellipse, Point, Rect, Shape};
 use graphicgene_core::node::{Dash, LineCap, LineJoin, Node, NodeId, NodeKind, Stroke};
+use graphicgene_core::paint::{ColorStop, Gradient, GradientKind, Paint};
 use graphicgene_render::{
     CpuRenderer, Damage, PixelRect, RenderScene, Renderer, device_area, scroll,
 };
@@ -38,6 +39,30 @@ impl Rng {
     }
 }
 
+/// A solid colour or, as often, a linear or radial gradient of two or three
+/// stops pointing anywhere in the shape's box — partly beyond it, too.
+fn fill(rng: &mut Rng) -> Paint {
+    if rng.below(2) == 0 {
+        return Paint::Solid(rng.colour());
+    }
+    let kind = if rng.below(2) == 0 {
+        GradientKind::Linear
+    } else {
+        GradientKind::Radial
+    };
+    let count = 2 + rng.below(2) as usize;
+    let stops = (0..count)
+        .map(|i| ColorStop {
+            offset: i as f64 / (count - 1) as f64,
+            color: rng.colour(),
+        })
+        .collect();
+    let mut gradient = Gradient::new(kind, stops);
+    gradient.start = Point::new(rng.range(-0.2, 1.2), rng.range(-0.2, 1.2));
+    gradient.end = Point::new(rng.range(-0.2, 1.2), rng.range(-0.2, 1.2));
+    Paint::Gradient(gradient)
+}
+
 fn shape(rng: &mut Rng) -> Node {
     let (x, y) = (rng.range(-20.0, 150.0), rng.range(-20.0, 110.0));
     let (w, h) = (rng.range(4.0, 50.0), rng.range(4.0, 40.0));
@@ -62,7 +87,10 @@ fn shape(rng: &mut Rng) -> Node {
             path
         }
     };
-    let mut node = Node::vector("Shape", path, Some(rng.colour()));
+    let mut node = Node::vector("Shape", path, None);
+    if let NodeKind::Vector(v) = &mut node.kind {
+        v.fill = Some(fill(rng));
+    }
     if rng.below(3) == 0
         && let NodeKind::Vector(v) = &mut node.kind
     {
@@ -160,7 +188,7 @@ fn random_edits(width: u32, height: u32, steps: usize, seed: u64, view: Affine) 
             }
             2 => {
                 if let NodeKind::Vector(v) = &mut doc.get_mut(id).unwrap().kind {
-                    v.fill = Some(rng.colour());
+                    v.fill = Some(fill(&mut rng));
                 }
             }
             3 => {

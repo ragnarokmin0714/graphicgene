@@ -19,6 +19,7 @@ use graphicgene_core::geom::{
     Affine, BezPath, Bounds, Rect, Shape, empty_bounds, is_empty_bounds, union,
 };
 use graphicgene_core::node::{BlendMode, Node, NodeId, NodeKind, Stroke};
+use graphicgene_core::paint::Paint;
 
 /// Antialiasing touches up to a pixel beyond a shape's edge — a *device*
 /// pixel, whatever the zoom, which is why it is added after the view
@@ -40,8 +41,11 @@ pub struct RenderItem {
     pub node: NodeId,
     pub transform: Affine,
     pub path: BezPath,
-    pub fill: Option<LinearRgba>,
+    pub fill: Option<Paint>,
     pub stroke: Option<Stroke>,
+    /// The path's own bounding box, before `transform`: the box a gradient
+    /// fill's unit square stretches over.
+    pub paint_box: Bounds,
     pub opacity: f32,
     pub blend_mode: BlendMode,
     /// Document-space bounds of everything this item draws, stroke
@@ -223,19 +227,21 @@ fn ancestry(doc: &Document, id: NodeId) -> Result<(Affine, f32, bool)> {
 /// outlines once the layout pass has set them.
 fn item(id: NodeId, node: &Node, transform: Affine, opacity: f32) -> Option<RenderItem> {
     let (path, fill, stroke) = match &node.kind {
-        NodeKind::Vector(vector) => (&vector.path, vector.fill, vector.stroke),
-        NodeKind::Text(text) => (&text.layout.as_ref()?.path, text.fill, None),
+        NodeKind::Vector(vector) => (&vector.path, &vector.fill, vector.stroke),
+        NodeKind::Text(text) => (&text.layout.as_ref()?.path, &text.fill, None),
         NodeKind::Group(_) => return None,
     };
     let reach = stroke.map_or(0.0, |s: Stroke| s.width * STROKE_REACH);
-    let local = path.bounding_box().inflate(reach, reach);
-    let bounds = transform.transform_rect_bbox(local);
+    let paint_box = path.bounding_box();
+    let bounds = transform.transform_rect_bbox(paint_box.inflate(reach, reach));
     Some(RenderItem {
         node: id,
         transform,
         path: path.clone(),
-        fill,
+        // A clone allocates only for a gradient, for its stops.
+        fill: fill.clone(),
         stroke,
+        paint_box,
         opacity,
         blend_mode: node.common.blend_mode,
         bounds,

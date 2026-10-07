@@ -28,10 +28,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ColorPicker } from "@/ColorPicker";
-import { isRgba } from "@/color";
+import { isRgba, toCss } from "@/color";
 import type {
   Alignment,
   Axis,
+  FillKind,
+  GradientFill,
   Mixed,
   Properties,
   PropertyChange,
@@ -221,13 +223,7 @@ function Sections({
       )}
 
       {p.fill !== undefined && (
-        <PaintSection
-          title="Fill"
-          color={p.fill}
-          onAdd={() => onSet({ fill: NEW_FILL })}
-          onRemove={() => onSet({ fill: null })}
-          {...field((fill: Rgba) => ({ fill }))}
-        />
+        <FillSection fill={p.fill} onPreview={onPreview} onCommit={onCommit} onCancel={onCancel} onSet={onSet} />
       )}
 
       {p.stroke !== undefined && (
@@ -312,8 +308,175 @@ function Section({
 }
 
 /**
- * A fill or a stroke: its colour with a picker, hex digits and alpha, and a
- * button that adds or removes it. `color` is null when there is none.
+ * The fill: a colour, a gradient, or none, with a switch between them.
+ * Changing the type keeps what it can — a colour fades out into a
+ * gradient, a gradient's first colour stays when it is made solid.
+ */
+function FillSection({
+  fill,
+  onPreview,
+  onCommit,
+  onCancel,
+  onSet,
+}: PropertyActions & { fill: Rgba | GradientFill | null | Mixed }) {
+  const action =
+    fill === null ? (
+      <Button size="icon-xs" aria-label="Add fill" onClick={() => onSet({ fill: NEW_FILL })}>
+        <Plus />
+      </Button>
+    ) : (
+      <Button size="icon-xs" aria-label="Remove fill" onClick={() => onSet({ fill: null })}>
+        <Minus />
+      </Button>
+    );
+  if (fill === null) return <Section title="Fill" action={action} />;
+  const kind: FillKind | Mixed = fill === "mixed" ? "mixed" : isRgba(fill) ? "solid" : fill.kind;
+  const change = <T,>(make: (value: T) => PropertyChange) => ({
+    onPreview: (value: T) => onPreview(make(value)),
+    onCommit,
+    onCancel,
+    onSet: (value: T) => onSet(make(value)),
+  });
+  return (
+    <Section title="Fill" action={action}>
+      <Segmented label="Fill type" options={FILL_KINDS} value={kind} onSet={(fillKind) => onSet({ fillKind })} />
+      {fill === "mixed" || isRgba(fill) ? (
+        <ColorFields name="Fill" color={fill} {...change((color: Rgba) => ({ fill: color }))} />
+      ) : (
+        <>
+          <div
+            aria-hidden
+            className="bg-checker h-3 overflow-hidden rounded-sm border"
+          >
+            <div className="size-full" style={{ background: previewCss(fill) }} />
+          </div>
+          {fill.kind === "linear" && (
+            <div className="grid grid-cols-2 gap-1.5">
+              <NumberField
+                name="Gradient angle"
+                label={<RotateCcw />}
+                value={fill.angle}
+                unit="°"
+                {...change((fillAngle: number) => ({ fillAngle }))}
+              />
+            </div>
+          )}
+          {fill.stops.map((stop, index) => (
+            // Stops keep their order — an offset stays between its
+            // neighbours' — so the index names one for as long as it lives.
+            <div key={index} className="flex gap-1.5">
+              <HexField
+                name={`Stop ${index + 1} hex`}
+                color={stop.color}
+                className="min-w-0 flex-1"
+                leading={
+                  <ColorPicker
+                    name={`Stop ${index + 1}`}
+                    color={stop.color}
+                    {...change((color: Rgba) => ({ fillStopColor: { index, color } }))}
+                  />
+                }
+                onSet={(rgb) => onSet({ fillStopColor: { index, color: [...rgb, stop.color[3]] } })}
+              />
+              <NumberField
+                name={`Stop ${index + 1} position`}
+                label={<span className="text-muted-foreground">@</span>}
+                value={stop.offset * 100}
+                unit="%"
+                min={0}
+                max={100}
+                precision={0}
+                className="w-[4.5rem]"
+                {...change((percent: number) => ({ fillStopOffset: { index, offset: percent / 100 } }))}
+              />
+              {fill.stops.length > 2 && (
+                <Button size="icon-xs" aria-label={`Remove stop ${index + 1}`} onClick={() => onSet({ removeFillStop: index })}>
+                  <Minus />
+                </Button>
+              )}
+            </div>
+          ))}
+          <Button size="xs" className="w-fit" aria-label="Add stop" onClick={() => onSet({ addFillStop: true })}>
+            <Plus />
+            Add stop
+          </Button>
+        </>
+      )}
+    </Section>
+  );
+}
+
+/** A gradient's stops, left to right, as CSS draws them: the bar over the stop rows. */
+function previewCss(gradient: GradientFill): string {
+  const stops = gradient.stops.map((stop) => `${toCss(stop.color)} ${stop.offset * 100}%`);
+  return `linear-gradient(to right, ${stops.join(", ")})`;
+}
+
+/** A colour's swatch with its picker, hex digits and alpha. */
+function ColorFields({
+  name,
+  color,
+  onPreview,
+  onCommit,
+  onCancel,
+  onSet,
+}: {
+  name: string;
+  color: Rgba | Mixed;
+  onPreview: (color: Rgba) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+  onSet: (color: Rgba) => void;
+}) {
+  // Alpha is edited in percent; the colour keeps its bytes.
+  const alpha = isRgba(color) ? (color[3] / 255) * 100 : "mixed";
+  const withAlpha = (percent: number): Rgba | null =>
+    isRgba(color) ? [color[0], color[1], color[2], Math.round((percent / 100) * 255)] : null;
+  return (
+    <div className="flex gap-1.5">
+      <HexField
+        name={`${name} hex`}
+        color={color}
+        className="flex-1"
+        leading={
+          <ColorPicker
+            name={name}
+            color={color}
+            onPreview={onPreview}
+            onCommit={onCommit}
+            onCancel={onCancel}
+            onSet={onSet}
+          />
+        }
+        onSet={(rgb) => onSet([...rgb, isRgba(color) ? color[3] : 255])}
+      />
+      <NumberField
+        name={`${name} alpha`}
+        label={<span className="bg-checker size-3 rounded-[2px]" />}
+        value={alpha}
+        unit="%"
+        min={0}
+        max={100}
+        precision={0}
+        className="w-[4.5rem]"
+        onPreview={(percent) => {
+          const next = withAlpha(percent);
+          if (next) onPreview(next);
+        }}
+        onCommit={onCommit}
+        onCancel={onCancel}
+        onSet={(percent) => {
+          const next = withAlpha(percent);
+          if (next) onSet(next);
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * A stroke: its colour with a picker, hex digits and alpha, and a button
+ * that adds or removes it. `color` is null when there is none.
  */
 function PaintSection({
   title,
@@ -348,51 +511,16 @@ function PaintSection({
       </Button>
     );
   if (color === null) return <Section title={title} action={action} />;
-
-  // Alpha is edited in percent; the colour keeps its bytes.
-  const alpha = isRgba(color) ? (color[3] / 255) * 100 : "mixed";
-  const withAlpha = (percent: number): Rgba | null =>
-    isRgba(color) ? [color[0], color[1], color[2], Math.round((percent / 100) * 255)] : null;
   return (
     <Section title={title} action={action}>
-      <div className="flex gap-1.5">
-        <HexField
-          name={`${title} hex`}
-          color={color}
-          className="flex-1"
-          leading={
-            <ColorPicker
-              name={title}
-              color={color}
-              onPreview={onPreview}
-              onCommit={onCommit}
-              onCancel={onCancel}
-              onSet={onSet}
-            />
-          }
-          onSet={(rgb) => onSet([...rgb, isRgba(color) ? color[3] : 255])}
-        />
-        <NumberField
-          name={`${title} alpha`}
-          label={<span className="bg-checker size-3 rounded-[2px]" />}
-          value={alpha}
-          unit="%"
-          min={0}
-          max={100}
-          precision={0}
-          className="w-[4.5rem]"
-          onPreview={(percent) => {
-            const next = withAlpha(percent);
-            if (next) onPreview(next);
-          }}
-          onCommit={onCommit}
-          onCancel={onCancel}
-          onSet={(percent) => {
-            const next = withAlpha(percent);
-            if (next) onSet(next);
-          }}
-        />
-      </div>
+      <ColorFields
+        name={title}
+        color={color}
+        onPreview={onPreview}
+        onCommit={onCommit}
+        onCancel={onCancel}
+        onSet={onSet}
+      />
       {children}
     </Section>
   );
@@ -437,6 +565,12 @@ const TEXT_ALIGNS: readonly Option<TextAlign>[] = [
   { value: "right", label: "Align text right", icon: <TextAlignEnd /> },
 ];
 
+const FILL_KINDS: readonly Option<FillKind>[] = [
+  { value: "solid", label: "Solid fill", icon: <FillKindIcon kind="solid" /> },
+  { value: "linear", label: "Linear gradient", icon: <FillKindIcon kind="linear" /> },
+  { value: "radial", label: "Radial gradient", icon: <FillKindIcon kind="radial" /> },
+];
+
 const CAPS: readonly Option<StrokeCap>[] = [
   { value: "butt", label: "Flat ends", icon: <CapIcon cap="butt" /> },
   { value: "round", label: "Round ends", icon: <CapIcon cap="round" /> },
@@ -476,6 +610,25 @@ function Segmented<T extends string>({
         </Button>
       ))}
     </div>
+  );
+}
+
+/** A square in one tone, in bands, or in rings: solid, linear, radial. */
+function FillKindIcon({ kind }: { kind: FillKind }) {
+  return (
+    <svg viewBox="0 0 12 12" fill="currentColor">
+      {kind === "solid" && <rect x="2" y="2" width="8" height="8" rx="1.5" />}
+      {kind === "linear" &&
+        [1, 0.55, 0.2].map((opacity, i) => (
+          <rect key={i} x={2 + (i * 8) / 3} y="2" width={8 / 3} height="8" opacity={opacity} />
+        ))}
+      {kind === "radial" &&
+        [
+          [4.5, 0.2],
+          [3, 0.55],
+          [1.5, 1],
+        ].map(([r, opacity]) => <circle key={r} cx="6" cy="6" r={r} opacity={opacity} />)}
+    </svg>
   );
 }
 

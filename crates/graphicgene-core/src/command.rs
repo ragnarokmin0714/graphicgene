@@ -13,11 +13,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::color::LinearRgba;
 use crate::doc::Document;
 use crate::error::{CoreError, Result};
 use crate::geom::{Affine, BezPath};
 use crate::node::{Node, NodeId, NodeKind, Stroke};
+use crate::paint::Paint;
 use crate::text::TextStyle;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +58,7 @@ pub enum Command {
     },
     SetFill {
         id: NodeId,
-        fill: Option<LinearRgba>,
+        fill: Option<Paint>,
     },
     SetStroke {
         id: NodeId,
@@ -166,7 +166,7 @@ impl Command {
                     NodeKind::Text(t) => &mut t.fill,
                     NodeKind::Group(_) => return Err(CoreError::NotAVector(*id)),
                 };
-                let previous = std::mem::replace(slot, *fill);
+                let previous = std::mem::replace(slot, fill.clone());
                 Ok(Command::SetFill {
                     id: *id,
                     fill: previous,

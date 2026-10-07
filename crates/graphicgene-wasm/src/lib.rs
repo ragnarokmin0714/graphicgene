@@ -28,8 +28,9 @@ use graphicgene_core::geom::{Affine, BezPath, Ellipse, Point, Rect, Shape, Size,
 use graphicgene_core::gesture::{Modifiers, ShapeKind, TransformKind};
 use graphicgene_core::layers::{Arrange, Drop};
 use graphicgene_core::node::{LineCap, LineJoin, Node, NodeId, Stroke};
+use graphicgene_core::paint::{GradientKind, Paint};
 use graphicgene_core::path_edit::PressOutcome;
-use graphicgene_core::properties::{Properties, Property, Shared};
+use graphicgene_core::properties::{FillKind, Properties, Property, Shared};
 use graphicgene_core::session::{
     Grab, LayerKind, Mode, Overlay, PEN_STROKE_WIDTH, Pointer, SelectOutcome, Session, Tool,
 };
@@ -630,7 +631,8 @@ impl Editor {
     /// stroke, strokeWidth, strokeCap, strokeJoin, strokeDash, strokeGap}`.
     /// Rotation is in degrees, counter-clockwise. A value the selected nodes
     /// do not share is `"mixed"`. A colour is `[r, g, b, a]`, or `null` for
-    /// none; `fill` and `stroke` are left out when only groups are selected,
+    /// none; `fill` may instead be a gradient, `{kind, angle, stops: [{color,
+    /// offset}]}`. `fill` and `stroke` are left out when only groups are selected,
     /// the stroke's width and style when nothing is stroked. Caps are
     /// "butt", "round" or "square", joins "miter", "round" or "bevel"; a
     /// dash and gap of 0 mean a solid line.
@@ -646,7 +648,10 @@ impl Editor {
     /// Show a change to the selection without recording it: every move of a
     /// slider or a scrubbed number. `change` is JSON with one key — `x`,
     /// `y`, `width`, `height`, `rotation`, `opacity` (0–1), `fill` (a colour
-    /// or `null`), `stroke` (`null`, or `{color, width}`), `strokeColor`,
+    /// or `null`), `fillKind` ("solid", "linear" or "radial"),
+    /// `fillStopColor` (`{index, color}`), `fillStopOffset` (`{index,
+    /// offset}`), `fillAngle`, `addFillStop` (any value), `removeFillStop`
+    /// (an index), `stroke` (`null`, or `{color, width}`), `strokeColor`,
     /// `strokeWidth`, `strokeCap`, `strokeJoin`, `strokeDash` or `strokeGap`.
     /// False when there is nothing it could apply to.
     #[wasm_bindgen(js_name = previewProperty)]
@@ -1227,8 +1232,8 @@ fn properties_json(p: &Properties) -> Value {
         "rotation": p.rotation,
         "opacity": shared(p.opacity, |o| json!(o)),
     });
-    if let Some(fill) = p.fill {
-        out["fill"] = shared(fill, colour);
+    if let Some(fill) = p.fill.clone() {
+        out["fill"] = shared(fill, |fill| fill.map_or(Value::Null, |f| paint_json(&f)));
     }
     if let Some(stroke) = p.stroke {
         out["stroke"] = shared(stroke, colour);
@@ -1274,6 +1279,12 @@ fn parse_property(change: &str) -> Result<Property, JsError> {
     let number = || value.as_f64().ok_or_else(|| invalid("expected a number"));
     let colour =
         |value: &Value| colour_value(value).ok_or_else(|| invalid("expected [r, g, b, a]"));
+    let index = |value: &Value| {
+        value
+            .as_u64()
+            .and_then(|i| usize::try_from(i).ok())
+            .ok_or_else(|| invalid("expected a stop index"))
+    };
     Ok(match key.as_str() {
         "x" => Property::X(number()?),
         "y" => Property::Y(number()?),
@@ -1283,6 +1294,25 @@ fn parse_property(change: &str) -> Result<Property, JsError> {
         "opacity" => Property::Opacity(number()? as f32),
         "fill" if value.is_null() => Property::Fill(None),
         "fill" => Property::Fill(Some(colour(value)?)),
+        "fillKind" => Property::FillKind(match value.as_str() {
+            Some("solid") => FillKind::Solid,
+            Some("linear") => FillKind::Linear,
+            Some("radial") => FillKind::Radial,
+            _ => return Err(invalid("expected solid, linear or radial")),
+        }),
+        "fillStopColor" => Property::FillStopColor {
+            index: index(&value["index"])?,
+            color: colour(&value["color"])?,
+        },
+        "fillStopOffset" => Property::FillStopOffset {
+            index: index(&value["index"])?,
+            offset: value["offset"]
+                .as_f64()
+                .ok_or_else(|| invalid("expected an offset"))?,
+        },
+        "fillAngle" => Property::FillAngle(number()?),
+        "addFillStop" => Property::AddFillStop,
+        "removeFillStop" => Property::RemoveFillStop(index(value)?),
         "stroke" if value.is_null() => Property::Stroke(None),
         "stroke" => Property::Stroke(Some(Stroke::solid(
             colour(&value["color"])?,
@@ -1322,6 +1352,27 @@ fn parse_property(change: &str) -> Result<Property, JsError> {
         }),
         _ => return Err(invalid(&format!("unknown property {key}"))),
     })
+}
+
+/// A fill for the page: a solid colour as `[r, g, b, a]`, as fills always
+/// were; a gradient as `{kind, angle, stops: [{color, offset}]}`, the angle
+/// in degrees counter-clockwise in the shape's box.
+fn paint_json(paint: &Paint) -> Value {
+    match paint {
+        Paint::Solid(color) => json!(color.to_srgb8()),
+        Paint::Gradient(gradient) => json!({
+            "kind": match gradient.kind {
+                GradientKind::Linear => "linear",
+                GradientKind::Radial => "radial",
+            },
+            "angle": gradient.angle(),
+            "stops": gradient
+                .stops
+                .iter()
+                .map(|stop| json!({"color": stop.color.to_srgb8(), "offset": stop.offset}))
+                .collect::<Vec<_>>(),
+        }),
+    }
 }
 
 fn cap_name(cap: LineCap) -> &'static str {

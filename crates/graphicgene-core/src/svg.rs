@@ -17,6 +17,7 @@ use crate::doc::Document;
 use crate::error::Result;
 use crate::geom::Affine;
 use crate::node::{BlendMode, LineCap, LineJoin, NodeId, NodeKind};
+use crate::paint::{GradientKind, Paint};
 
 /// The document as an SVG file the size of its artboard.
 pub fn to_svg(doc: &Document) -> Result<String> {
@@ -28,14 +29,23 @@ pub fn to_svg(doc: &Document) -> Result<String> {
         out,
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">"#
     );
+    let mut gradients = 0;
     for &child in doc.children_of(doc.root())? {
-        write_node(doc, child, 1, &mut out)?;
+        write_node(doc, child, 1, &mut out, &mut gradients)?;
     }
     out.push_str("</svg>\n");
     Ok(out)
 }
 
-fn write_node(doc: &Document, id: NodeId, depth: usize, out: &mut String) -> Result<()> {
+/// Write a node and what is inside it. `gradients` counts the gradients
+/// written so far, to name the next one.
+fn write_node(
+    doc: &Document,
+    id: NodeId,
+    depth: usize,
+    out: &mut String,
+    gradients: &mut usize,
+) -> Result<()> {
     let node = doc.get(id)?;
     if !node.common.visible {
         return Ok(());
@@ -65,7 +75,7 @@ fn write_node(doc: &Document, id: NodeId, depth: usize, out: &mut String) -> Res
         NodeKind::Group(group) => {
             let _ = writeln!(out, "{indent}<g{attrs}>");
             for &child in &group.children {
-                write_node(doc, child, depth + 1, out)?;
+                write_node(doc, child, depth + 1, out, gradients)?;
             }
             let _ = writeln!(out, "{indent}</g>");
         }
@@ -79,15 +89,7 @@ fn write_node(doc: &Document, id: NodeId, depth: usize, out: &mut String) -> Res
             if d.is_empty() {
                 return Ok(());
             }
-            let fill = match text.fill {
-                Some(fill) => {
-                    let (hex, alpha) = srgb(fill);
-                    let opacity =
-                        alpha.map_or(String::new(), |a| format!(r#" fill-opacity="{a}""#));
-                    format!(r#" fill="{hex}"{opacity}"#)
-                }
-                None => r#" fill="none""#.to_owned(),
-            };
+            let fill = fill_attrs(text.fill.as_ref(), &indent, out, gradients);
             let label = escape(&text.content);
             let _ = writeln!(
                 out,
@@ -99,17 +101,7 @@ fn write_node(doc: &Document, id: NodeId, depth: usize, out: &mut String) -> Res
             if d.is_empty() {
                 return Ok(());
             }
-            let mut paint = String::new();
-            match vector.fill {
-                Some(fill) => {
-                    let (hex, alpha) = srgb(fill);
-                    let _ = write!(paint, r#" fill="{hex}""#);
-                    if let Some(alpha) = alpha {
-                        let _ = write!(paint, r#" fill-opacity="{alpha}""#);
-                    }
-                }
-                None => paint.push_str(r#" fill="none""#),
-            }
+            let mut paint = fill_attrs(vector.fill.as_ref(), &indent, out, gradients);
             if let Some(stroke) = vector.stroke {
                 let (hex, alpha) = srgb(stroke.color);
                 let _ = write!(
@@ -145,6 +137,65 @@ fn write_node(doc: &Document, id: NodeId, depth: usize, out: &mut String) -> Res
         }
     }
     Ok(())
+}
+
+/// The fill attributes for a path. A gradient is written first, as a
+/// definition of its own just before the path, in the shape's box
+/// (`objectBoundingBox`, SVG's default), which is where the document keeps it.
+fn fill_attrs(
+    fill: Option<&Paint>,
+    indent: &str,
+    out: &mut String,
+    gradients: &mut usize,
+) -> String {
+    match fill {
+        None => r#" fill="none""#.to_owned(),
+        Some(Paint::Solid(color)) => {
+            let (hex, alpha) = srgb(*color);
+            let opacity = alpha.map_or(String::new(), |a| format!(r#" fill-opacity="{a}""#));
+            format!(r#" fill="{hex}"{opacity}"#)
+        }
+        Some(Paint::Gradient(gradient)) => {
+            *gradients += 1;
+            let id = format!("gradient-{gradients}");
+            let (start, end) = (gradient.start, gradient.end);
+            let (tag, geometry) = match gradient.kind {
+                GradientKind::Linear => (
+                    "linearGradient",
+                    format!(
+                        r#"x1="{}" y1="{}" x2="{}" y2="{}""#,
+                        number(start.x),
+                        number(start.y),
+                        number(end.x),
+                        number(end.y)
+                    ),
+                ),
+                GradientKind::Radial => (
+                    "radialGradient",
+                    format!(
+                        r#"cx="{}" cy="{}" r="{}""#,
+                        number(start.x),
+                        number(start.y),
+                        number((end - start).hypot())
+                    ),
+                ),
+            };
+            let _ = writeln!(out, "{indent}<defs>");
+            let _ = writeln!(out, r#"{indent}  <{tag} id="{id}" {geometry}>"#);
+            for stop in &gradient.stops {
+                let (hex, alpha) = srgb(stop.color);
+                let opacity = alpha.map_or(String::new(), |a| format!(r#" stop-opacity="{a}""#));
+                let _ = writeln!(
+                    out,
+                    r#"{indent}    <stop offset="{}" stop-color="{hex}"{opacity}/>"#,
+                    number(stop.offset)
+                );
+            }
+            let _ = writeln!(out, "{indent}  </{tag}>");
+            let _ = writeln!(out, "{indent}</defs>");
+            format!(r#" fill="url(#{id})""#)
+        }
+    }
 }
 
 /// A colour as SVG wants it: 8-bit sRGB hex, plus alpha when not opaque.

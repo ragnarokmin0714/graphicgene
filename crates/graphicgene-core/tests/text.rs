@@ -9,6 +9,7 @@ use graphicgene_core::fonts::Fonts;
 use graphicgene_core::geom::{BezPath, PathEl, Point, Rect};
 use graphicgene_core::gesture::Modifiers;
 use graphicgene_core::node::{NodeId, NodeKind};
+use graphicgene_core::paint::Paint;
 use graphicgene_core::properties::{Property, Shared};
 use graphicgene_core::session::{Mode, Pointer, SelectOutcome, Session, Tool};
 use graphicgene_core::testing::TestFont;
@@ -359,7 +360,7 @@ fn the_properties_panel_sets_text() {
         (text.size, text.align),
         (Shared::Same(24.0), Shared::Same(TextAlign::Left))
     );
-    assert_eq!(p.fill, Some(Shared::Same(Some(INK))));
+    assert_eq!(p.fill, Some(Shared::Same(Some(Paint::Solid(INK)))));
     assert_eq!(p.stroke, None, "text has no stroke");
 
     assert!(session.set_property(Property::FontSize(48.0)).unwrap());

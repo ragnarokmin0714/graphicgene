@@ -261,3 +261,53 @@ fn stroke_styles_round_trip_and_plain_strokes_are_written_as_before() {
         "only the styled one: {plain_json}"
     );
 }
+
+#[test]
+fn fills_read_from_older_files_and_gradients_round_trip_exactly() {
+    use graphicgene_core::geom::Point;
+    use graphicgene_core::node::NodeKind;
+    use graphicgene_core::paint::{ColorStop, Gradient, GradientKind, Paint};
+
+    let mut doc = Document::new();
+    let mut journal = Journal::new();
+    let solid = insert(&mut doc, &mut journal, rect_node("Solid"));
+    let shaded = insert(&mut doc, &mut journal, rect_node("Shaded"));
+    let mut gradient = Gradient::new(
+        GradientKind::Radial,
+        vec![
+            ColorStop {
+                offset: 0.0,
+                color: LinearRgba::new(0.1, 0.2, 0.3, 1.0),
+            },
+            ColorStop {
+                offset: 0.37,
+                color: LinearRgba::new(0.9, 0.1, 0.0, 0.5),
+            },
+            ColorStop {
+                offset: 1.0,
+                color: LinearRgba::WHITE,
+            },
+        ],
+    );
+    gradient.start = Point::new(0.3, 0.6012345678901234);
+    if let NodeKind::Vector(v) = &mut doc.get_mut(shaded).unwrap().kind {
+        v.fill = Some(Paint::Gradient(gradient.clone()));
+    }
+    let text = Project::new(doc).to_json().unwrap();
+
+    // A solid fill is written bare, as every version wrote it.
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let nodes = value["document"].to_string();
+    assert!(
+        nodes.contains(r#""fill":{"a":1.0,"b":0.0,"g":0.0,"r":0.0}"#),
+        "{nodes}"
+    );
+
+    let back = Project::from_json(&text).unwrap().document;
+    let fill_of = |id| match &back.get(id).unwrap().kind {
+        NodeKind::Vector(v) => v.fill.clone(),
+        _ => unreachable!(),
+    };
+    assert_eq!(fill_of(shaded), Some(Paint::Gradient(gradient)));
+    assert!(matches!(fill_of(solid), Some(Paint::Solid(_))));
+}

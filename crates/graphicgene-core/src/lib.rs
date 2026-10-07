@@ -22,6 +22,7 @@ pub mod hit;
 pub mod layers;
 pub mod layout;
 pub mod node;
+pub mod paint;
 pub mod path_edit;
 pub mod pen;
 pub mod project;

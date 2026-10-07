@@ -12,8 +12,9 @@ them.
 
 > **Status: v0.4 preview.** Draw rectangles, ellipses, bezier paths and
 > text — Chinese included; select, move, scale and rotate them; edit any path point by
-> point; set position, size, rotation, opacity, fill and stroke — dashed,
-> with round or square ends and corners — in a properties panel; align and distribute them; rename, hide, lock,
+> point; set position, size, rotation, opacity, fill — a colour or a
+> linear or radial gradient — and stroke — dashed, with round or square
+> ends and corners — in a properties panel; align and distribute them; rename, hide, lock,
 > reorder and group layers; copy,
 > paste and duplicate; zoom and pan, sharp on HiDPI screens; undo
 > everything.

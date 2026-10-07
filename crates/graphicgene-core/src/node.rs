@@ -9,6 +9,7 @@ use slotmap::new_key_type;
 
 use crate::color::LinearRgba;
 use crate::geom::{Affine, BezPath, Bounds, Shape};
+use crate::paint::Paint;
 use crate::text::TextNode;
 
 new_key_type! {
@@ -129,7 +130,7 @@ fn is_default<T: Default + PartialEq>(value: &T) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VectorNode {
     pub path: BezPath,
-    pub fill: Option<LinearRgba>,
+    pub fill: Option<Paint>,
     pub stroke: Option<Stroke>,
 }
 
@@ -167,6 +168,7 @@ impl Node {
         }
     }
 
+    /// A path filled with one colour, or not filled; no stroke.
     pub fn vector(name: impl Into<String>, path: BezPath, fill: Option<LinearRgba>) -> Self {
         Self {
             common: NodeCommon {
@@ -175,7 +177,7 @@ impl Node {
             },
             kind: NodeKind::Vector(VectorNode {
                 path,
-                fill,
+                fill: fill.map(Paint::Solid),
                 stroke: None,
             }),
         }

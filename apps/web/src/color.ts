@@ -5,7 +5,7 @@
  * core converts the sRGB bytes it is sent; nothing here is the colour model,
  * and nothing here converts to or from linear light.
  */
-import type { Mixed, Rgba } from "@/editor";
+import type { Rgba } from "@/editor";
 
 /** Fills for new shapes, cycled so a fresh canvas is not a wall of one colour; also the picker's presets. */
 export const SWATCHES: readonly Rgba[] = [
@@ -19,7 +19,7 @@ export const SWATCHES: readonly Rgba[] = [
 /** Hue in degrees (0–360), saturation and value 0–1. */
 export type Hsv = { h: number; s: number; v: number };
 
-export function isRgba(color: Rgba | Mixed | null | undefined): color is Rgba {
+export function isRgba(color: unknown): color is Rgba {
   return Array.isArray(color);
 }
 

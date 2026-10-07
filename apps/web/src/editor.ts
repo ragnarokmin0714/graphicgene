@@ -50,8 +50,8 @@ export type Properties = {
   /** Always 0 for several nodes: they share an unrotated box. */
   rotation: number;
   opacity: number | Mixed;
-  /** `null` is no fill; left out when only groups are selected. */
-  fill?: Rgba | null | Mixed;
+  /** A colour or a gradient; `null` is no fill. Left out when only groups are selected. */
+  fill?: Rgba | GradientFill | null | Mixed;
   /** The stroke colour, as `fill`: `null` is no stroke. */
   stroke?: Rgba | null | Mixed;
   /** Of the strokes there are; left out when nothing is stroked, as is the rest of their style. */
@@ -78,7 +78,19 @@ export type PropertyChange =
   | { height: number }
   | { rotation: number }
   | { opacity: number }
+  /** Fills with one colour, or removes the fill. */
   | { fill: Rgba | null }
+  /** Makes the fills there are solid or gradients: a colour fades to clear, a gradient keeps its first colour. */
+  | { fillKind: FillKind }
+  | { fillStopColor: { index: number; color: Rgba } }
+  /** Kept between the neighbouring stops'. */
+  | { fillStopOffset: { index: number; offset: number } }
+  /** A linear gradient's direction, degrees counter-clockwise in the shape's box. */
+  | { fillAngle: number }
+  /** A stop in the middle of the widest gap, in the colour already there. */
+  | { addFillStop: true }
+  /** By index; two stops always stay. */
+  | { removeFillStop: number }
   /** Removes strokes; `strokeColor` adds them. */
   | { stroke: null }
   /** Recolours strokes, adding a thin one where there is none. */
@@ -186,6 +198,16 @@ export type DropPlace = "above" | "below" | "inside";
 
 /** A step through the stacking order. */
 export type Arrangement = "forward" | "backward" | "front" | "back";
+export type GradientKind = "linear" | "radial";
+export type FillKind = "solid" | GradientKind;
+/** One colour of a gradient, at `offset` from 0 to 1. */
+export type GradientStop = { color: Rgba; offset: number };
+/**
+ * A gradient fill, spread over the shape's own box. `angle` is a linear
+ * gradient's direction in degrees counter-clockwise, in that box.
+ */
+export type GradientFill = { kind: GradientKind; angle: number; stops: GradientStop[] };
+
 /** How a stroke's open ends are drawn; the names are SVG's. */
 export type StrokeCap = "butt" | "round" | "square";
 /** How a stroke turns a corner; the names are SVG's. */
