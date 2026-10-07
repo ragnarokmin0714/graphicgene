@@ -192,6 +192,42 @@ pub struct Session {
     snap_tolerance: f64,
     /// Ctrl was held at the last pointer event: no snapping for now.
     snap_held_off: bool,
+    /// An Alt-drag's copies, made at the press and moved by the gesture.
+    duplicating: Option<DuplicateDrag>,
+    /// The last move dragged, for Transform Again.
+    last_move: Option<LastMove>,
+}
+
+/// Copies an Alt-drag made at the press. They are in the document but not
+/// the journal until the release, which records the copying and the move
+/// as one step — or, if the drag went nowhere, takes them out again.
+#[derive(Debug)]
+struct DuplicateDrag {
+    /// Attaches the copies.
+    command: Command,
+    /// Detaches them.
+    inverse: Command,
+    copies: Vec<NodeId>,
+    /// The selection before the press.
+    originals: Vec<NodeId>,
+}
+
+/// A move to repeat: how far, and whether it copied first.
+#[derive(Debug, Clone, Copy)]
+struct LastMove {
+    offset: Vec2,
+    duplicate: bool,
+}
+
+/// Where a paste goes in the stack of layers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PastePlace {
+    /// On top of everything.
+    Top,
+    /// Right above the selection — on top with nothing selected.
+    Front,
+    /// Right below the selection — at the bottom with nothing selected.
+    Back,
 }
 
 impl Session {
@@ -312,6 +348,8 @@ impl Session {
         self.route = None;
         self.text_edit = None;
         self.hover = None;
+        self.duplicating = None;
+        self.last_move = None;
         self.document = project.document;
         self.journal.clear();
         self.selection.clear();
@@ -582,12 +620,22 @@ impl Session {
 
     /// Finish the gesture. Returns the new node when a shape was drawn.
     pub fn end_gesture(&mut self) -> Result<Option<NodeId>> {
-        match self.gesture.take() {
-            Some(gesture) => {
-                gesture.commit(&mut self.document, &mut self.journal, &mut self.selection)
-            }
-            None => Ok(None),
+        let Some(gesture) = self.gesture.take() else {
+            return Ok(None);
+        };
+        let moved = gesture.translation();
+        if let Some(duplicate) = self.duplicating.take() {
+            self.end_duplicate_drag(gesture, duplicate)?;
+            return Ok(None);
         }
+        let created = gesture.commit(&mut self.document, &mut self.journal, &mut self.selection)?;
+        if let Some(offset) = moved {
+            self.last_move = Some(LastMove {
+                offset,
+                duplicate: false,
+            });
+        }
+        Ok(created)
     }
 
     /// Abandon the gesture. Returns whether one was active.
@@ -596,6 +644,110 @@ impl Session {
             return Ok(false);
         };
         gesture.cancel(&mut self.document, &mut self.selection)?;
+        if let Some(duplicate) = self.duplicating.take() {
+            duplicate.inverse.apply(&mut self.document)?;
+            self.selection.set(duplicate.originals);
+        }
+        Ok(true)
+    }
+
+    /// Start moving the selection — or, with `copy`, copies of it, made
+    /// right above each original: an Alt-drag. Returns false as
+    /// `begin_transform` does.
+    pub fn begin_move(&mut self, point: Point, copy: bool) -> Result<bool> {
+        if !copy {
+            return self.begin_transform(TransformKind::Move, point);
+        }
+        self.cancel_gesture()?;
+        self.cancel_property()?;
+        if self.selection_locked()? {
+            return Ok(false);
+        }
+        let originals = self.selection.ids().to_vec();
+        let Some((command, copies)) = clipboard::duplicate(&mut self.document, &originals)? else {
+            return Ok(false);
+        };
+        let inverse = command.apply(&mut self.document)?;
+        self.selection.set(copies.iter().copied());
+        if !self.begin_transform(TransformKind::Move, point)? {
+            inverse.apply(&mut self.document)?;
+            self.selection.set(originals);
+            return Ok(false);
+        }
+        self.duplicating = Some(DuplicateDrag {
+            command,
+            inverse,
+            copies,
+            originals,
+        });
+        Ok(true)
+    }
+
+    /// Release an Alt-drag: the copying and the move go in the journal as
+    /// one step. A drag that went nowhere leaves no copies — Alt-clicking
+    /// copies nothing.
+    fn end_duplicate_drag(&mut self, gesture: Gesture, duplicate: DuplicateDrag) -> Result<()> {
+        let moved = gesture.translation();
+        let finals: Vec<Affine> = duplicate
+            .copies
+            .iter()
+            .map(|&id| Ok(self.document.get(id)?.common.transform))
+            .collect::<Result<_>>()?;
+        // Back to the state before the press, then forward again through
+        // the journal, so undo takes both away and redo brings both back.
+        gesture.cancel(&mut self.document, &mut self.selection)?;
+        duplicate.inverse.apply(&mut self.document)?;
+        let Some(offset) = moved else {
+            self.selection.set(duplicate.originals);
+            return Ok(());
+        };
+        let mut commands = vec![duplicate.command];
+        commands.extend(
+            duplicate
+                .copies
+                .iter()
+                .zip(finals)
+                .map(|(&id, transform)| Command::SetTransform { id, transform }),
+        );
+        self.journal
+            .execute(&mut self.document, Command::Batch(commands))?;
+        self.selection.set(duplicate.copies);
+        self.last_move = Some(LastMove {
+            offset,
+            duplicate: true,
+        });
+        Ok(())
+    }
+
+    /// Illustrator's Transform Again: move the selection as far as the last
+    /// drag moved it, copying it first if that drag did — so an Alt-drag
+    /// and then this, again and again, steps out a row of copies. One undo
+    /// step; false with no move to repeat or nothing to move.
+    pub fn repeat_move(&mut self) -> Result<bool> {
+        self.end_interaction()?;
+        let Some(last) = self.last_move else {
+            return Ok(false);
+        };
+        if self.selection.is_empty() || self.selection_locked()? {
+            return Ok(false);
+        }
+        let delta = Affine::translate(last.offset);
+        if !last.duplicate {
+            let command =
+                gesture::world_delta_command(&self.document, self.selection.ids(), delta)?;
+            self.execute(command)?;
+            return Ok(true);
+        }
+        let Some((copy, copies)) = clipboard::duplicate(&mut self.document, self.selection.ids())?
+        else {
+            return Ok(false);
+        };
+        // The move's local transforms need the copies in place to work out.
+        let inverse = copy.apply(&mut self.document)?;
+        let moves = gesture::world_delta_command(&self.document, &copies, delta);
+        inverse.apply(&mut self.document)?;
+        self.execute(Command::Batch(vec![copy, moves?]))?;
+        self.selection.set(copies);
         Ok(true)
     }
 
@@ -1028,9 +1180,36 @@ impl Session {
     /// from; what was pasted becomes the selection. False for text that is
     /// not graphicgene nodes.
     pub fn paste(&mut self, text: &str) -> Result<bool> {
+        self.paste_at(text, PastePlace::Top)
+    }
+
+    /// Paste where it was copied from on the page, and at `place` in the
+    /// stack: Illustrator's Paste in Front and Paste in Back put it right
+    /// above or below the selection, in the same group.
+    pub fn paste_at(&mut self, text: &str, place: PastePlace) -> Result<bool> {
         self.end_interaction()?;
         let root = self.document.root();
-        let Some((command, pasted)) = clipboard::paste(&mut self.document, text, root)? else {
+        let roots = layers::roots(&self.document, self.selection.ids())?;
+        let next_to = match place {
+            PastePlace::Top => None,
+            PastePlace::Front => roots.last().map(|&id| (id, 1)),
+            PastePlace::Back => roots.first().map(|&id| (id, 0)),
+        };
+        let (parent, index) = match next_to {
+            Some((id, after)) => {
+                let parent = self.document.get(id)?.common.parent.unwrap_or(root);
+                let at = self
+                    .document
+                    .children_of(parent)?
+                    .iter()
+                    .position(|&c| c == id);
+                (parent, at.map(|i| i + after))
+            }
+            None if place == PastePlace::Back => (root, Some(0)),
+            None => (root, None),
+        };
+        let Some((command, pasted)) = clipboard::paste(&mut self.document, text, parent, index)?
+        else {
             return Ok(false);
         };
         self.execute(command)?;

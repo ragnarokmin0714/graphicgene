@@ -32,7 +32,8 @@ use graphicgene_core::paint::{GradientKind, Paint};
 use graphicgene_core::path_edit::PressOutcome;
 use graphicgene_core::properties::{FillKind, Properties, Property, Shared};
 use graphicgene_core::session::{
-    Grab, LayerKind, Mode, Overlay, PEN_STROKE_WIDTH, Pointer, SelectOutcome, Session, Tool,
+    Grab, LayerKind, Mode, Overlay, PEN_STROKE_WIDTH, PastePlace, Pointer, SelectOutcome, Session,
+    Tool,
 };
 use graphicgene_core::text::TextAlign;
 use graphicgene_core::view::{MAX_ZOOM, View};
@@ -642,6 +643,25 @@ impl Editor {
     /// is not graphicgene nodes.
     pub fn paste(&mut self, text: &str) -> Result<bool, JsError> {
         self.session.paste(text).map_err(to_js)
+    }
+
+    /// Paste where it was copied from, and "front" or "back": right above
+    /// or below the selection, in its group.
+    #[wasm_bindgen(js_name = pasteAt)]
+    pub fn paste_at(&mut self, text: &str, place: &str) -> Result<bool, JsError> {
+        let place = match place {
+            "front" => PastePlace::Front,
+            "back" => PastePlace::Back,
+            _ => return Err(JsError::new("paste at front or back")),
+        };
+        self.session.paste_at(text, place).map_err(to_js)
+    }
+
+    /// Move the selection as far as the last drag did, copying it first if
+    /// that was an Alt-drag. One undo step.
+    #[wasm_bindgen(js_name = repeatMove)]
+    pub fn repeat_move(&mut self) -> Result<bool, JsError> {
+        self.session.repeat_move().map_err(to_js)
     }
 
     /// Copy the selection in place, each copy right above its original.

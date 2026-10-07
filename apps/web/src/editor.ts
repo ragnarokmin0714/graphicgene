@@ -639,6 +639,16 @@ export class EditorHandle {
     return this.inner.paste(text);
   }
 
+  /** Paste right above or below the selection, where it was copied from: Illustrator's Paste in Front / Back. */
+  pasteAt(text: string, place: "front" | "back"): boolean {
+    return this.inner.pasteAt(text, place);
+  }
+
+  /** Move the selection as far as the last drag did, copying first after an Alt-drag: one undo step. */
+  repeatMove(): boolean {
+    return this.inner.repeatMove();
+  }
+
   /** Copy the selection in place, each copy right above its original. */
   duplicate(): boolean {
     return this.inner.duplicate();

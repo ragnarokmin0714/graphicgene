@@ -441,6 +441,19 @@ impl Gesture {
         Ok(())
     }
 
+    /// How far a move has carried the selection so far, in document space;
+    /// `None` for anything but a move that went somewhere.
+    pub fn translation(&self) -> Option<Vec2> {
+        match &self.kind {
+            Kind::Transform {
+                kind: TransformKind::Move,
+                delta,
+                ..
+            } if *delta != Affine::IDENTITY => Some(delta.translation()),
+            _ => None,
+        }
+    }
+
     /// Where the selection frame is right now, for drawing handles during a
     /// transform. A rotated multi-selection keeps its rotated frame for the
     /// whole drag instead of re-fitting an ever-growing axis-aligned box.

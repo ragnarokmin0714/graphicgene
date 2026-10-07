@@ -1092,6 +1092,33 @@ try {
   await checkScreen("Ctrl+Y shows outlines", { outline: true });
   await key("y", { ctrlKey: true });
   await checkScreen("and again puts the paint back");
+
+  const layersBeforeObject = layerCount();
+  await key("m");
+  await drag([620, 420], [660, 460], { ctrlKey: true });
+  await drag([640, 440], [700, 440], { altKey: true, ctrlKey: true });
+  check(
+    layerCount() === layersBeforeObject + 2 && frameOf() === "680 420 40 40",
+    `an Alt-drag moves a copy (${frameOf()})`,
+  );
+  await key("d", { ctrlKey: true });
+  check(
+    layerCount() === layersBeforeObject + 3 && frameOf() === "740 420 40 40",
+    `Ctrl+D, Transform Again, steps out another (${frameOf()})`,
+  );
+  await fire(document.body, clipboardEvent("copy").event);
+  await key("b", { ctrlKey: true });
+  check(
+    layerCount() === layersBeforeObject + 4 && selectedRows()[0] === layerRows()[1],
+    "Ctrl+B pastes right behind the selection",
+  );
+  await key("f", { ctrlKey: true });
+  check(
+    layerCount() === layersBeforeObject + 5 && selectedRows()[0] === layerRows()[1] && frameOf() === "740 420 40 40",
+    "and Ctrl+F right in front of it, where it was copied from",
+  );
+  for (let i = 0; i < 5; i++) await key("z", { ctrlKey: true });
+  check(layerCount() === layersBeforeObject, "each of those one undo step");
   await pickKeymap("graphicgene");
   check(localStorage.getItem("graphicgene:keymap") === null, "back to graphicgene's, nothing stored");
   await key("!", { code: "Digit1", shiftKey: true });

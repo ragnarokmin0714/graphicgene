@@ -135,7 +135,10 @@ export function App() {
 
   // Copy, cut and paste arrive as the browser's clipboard events, the one
   // place a page may use the system clipboard without asking. A text field
-  // keeps its own; everything else is the document's.
+  // keeps its own; everything else is the document's. The last nodes seen
+  // going through are kept for Paste in Front and Back, which are keys, not
+  // clipboard events, and so cannot read the system clipboard.
+  const lastClip = useRef<string | null>(null);
   useEffect(() => {
     const inTextField = (target: EventTarget | null) =>
       target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]");
@@ -143,13 +146,17 @@ export function App() {
       if (inTextField(event.target) || !event.clipboardData) return;
       const text = run((editor) => (event.type === "cut" ? editor.cut() : editor.copy()));
       if (!text) return;
+      lastClip.current = text;
       event.clipboardData.setData("text/plain", text);
       event.preventDefault();
     };
     const onPaste = (event: ClipboardEvent) => {
       if (inTextField(event.target)) return;
       const text = event.clipboardData?.getData("text/plain");
-      if (text && run((editor) => editor.paste(text))) event.preventDefault();
+      if (text && run((editor) => editor.paste(text))) {
+        lastClip.current = text;
+        event.preventDefault();
+      }
     };
     document.addEventListener("copy", onCopy);
     document.addEventListener("cut", onCopy);
@@ -376,7 +383,17 @@ export function App() {
       { key: "delete", run: () => run((editor) => editor.deleteSelection()) },
       { key: "backspace", run: () => run((editor) => editor.deleteSelection()) },
       { key: "a", mod: true, run: () => run((editor) => editor.selectAll()) },
-      { key: "d", mod: true, run: layerActions.duplicate },
+      { key: "d", mod: true, keymap: "default", run: layerActions.duplicate },
+      { key: "d", mod: true, keymap: "illustrator", run: () => run((editor) => editor.repeatMove()) },
+      ...(["front", "back"] as const).map((place) => ({
+        key: place === "front" ? "f" : "b",
+        mod: true,
+        keymap: "illustrator" as const,
+        run: () => {
+          const text = lastClip.current;
+          if (text) run((editor) => editor.pasteAt(text, place));
+        },
+      })),
       // Photoshop's binding for the same thing.
       { key: "j", mod: true, run: layerActions.duplicate },
       { key: "g", mod: true, run: layerActions.group },

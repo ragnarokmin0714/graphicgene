@@ -143,7 +143,7 @@ impl Session {
                         }
                         None => match self.select_at(point, modifiers.shift, at.hit_tolerance)? {
                             SelectOutcome::Drag => {
-                                self.begin_transform(TransformKind::Move, point)?;
+                                self.begin_move(point, modifiers.alt)?;
                             }
                             SelectOutcome::Miss => self.begin_marquee(point, modifiers.shift)?,
                             SelectOutcome::Hit => {}

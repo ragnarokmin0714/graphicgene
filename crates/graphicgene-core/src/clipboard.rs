@@ -57,14 +57,17 @@ pub fn copy(doc: &Document, ids: &[NodeId]) -> Result<Option<String>> {
     Ok(Some(serde_json::to_string(&clip)?))
 }
 
-/// Paste clipboard text on top of `parent`: the nodes enter the arena with
-/// fresh ids, and the command attaches them. Returns the command and the
-/// new top-level nodes, or `None` for text that is not graphicgene nodes —
-/// anything at all may be on the clipboard, and it is not an error.
+/// Paste clipboard text into `parent` at `index` among its children — on
+/// top of it with `None`: the nodes enter the arena with fresh ids, and the
+/// command attaches them, each where it was copied from on the page.
+/// Returns the command and the new top-level nodes, or `None` for text that
+/// is not graphicgene nodes — anything at all may be on the clipboard, and
+/// it is not an error.
 pub fn paste(
     doc: &mut Document,
     text: &str,
     parent: NodeId,
+    index: Option<usize>,
 ) -> Result<Option<(Command, Vec<NodeId>)>> {
     let Ok(clip) = serde_json::from_str::<Clip>(text) else {
         return Ok(None);
@@ -72,10 +75,14 @@ pub fn paste(
     if clip.mark != MARK || clip.version > VERSION || clip.nodes.is_empty() {
         return Ok(None);
     }
-    let index = doc.children_of(parent)?.len();
+    let index = index.unwrap_or(doc.children_of(parent)?.len());
+    // Copied nodes carry world transforms; inside a moved group they need
+    // local ones that land them in the same place.
+    let to_local = doc.world_transform(parent)?.inverse();
     let mut commands = Vec::new();
     let mut pasted = Vec::new();
-    for (offset, tree) in clip.nodes.into_iter().enumerate() {
+    for (offset, mut tree) in clip.nodes.into_iter().enumerate() {
+        tree.node.common.transform = to_local * tree.node.common.transform;
         let id = instantiate(doc, tree, &mut commands);
         commands.push(Command::Attach {
             id,
