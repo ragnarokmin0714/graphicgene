@@ -10,14 +10,16 @@ them.
 
 **Try it:** <https://ragnarokmin0714.github.io/graphicgene/>
 
-> **Status: v0.4 preview.** Draw rectangles, ellipses, bezier paths and
-> text — Chinese included; select, move, scale and rotate them; edit any path point by
-> point; set position, size, rotation, opacity, fill — a colour or a
-> linear or radial gradient — and stroke — dashed, with round or square
-> ends and corners — in a properties panel; align and distribute them; rename, hide, lock,
-> reorder and group layers; copy,
-> paste and duplicate; zoom and pan, sharp on HiDPI screens; undo
-> everything.
+> **Status: v0.5 preview.** Draw rectangles, ellipses, bezier paths and
+> text — Chinese included; select, move, scale and rotate them, snapping
+> to other layers with smart guides; edit any path point by point; set
+> position, size, rotation, opacity, fill — a colour or a linear or radial
+> gradient — and stroke — dashed, with round or square ends and corners —
+> in a properties panel, or take them from another layer with the
+> eyedropper; align and distribute them; rename, hide, lock, reorder and
+> group layers; copy, paste and duplicate; zoom and pan, sharp on HiDPI
+> screens, or see everything as outlines; undo everything. Illustrator's
+> shortcuts are one setting away.
 > Work autosaves in the browser, project files can be downloaded and
 > reopened, and the artwork exports as SVG or PNG. The same app also runs in
 > a desktop window on Windows, macOS and Linux, saving to files — installers
@@ -28,25 +30,32 @@ them.
 
 | | |
 |---|---|
-| `V` `R` `O` `P` `T` | Select, Rectangle, Ellipse, Pen, Text |
+| `V` `A` `R` `O` `P` `T` `I` `H` | Select, Direct select, Rectangle, Ellipse, Pen, Text, Eyedropper, Hand — `M` and `L` work for Rectangle and Ellipse too. Single keys work with Chinese input switched on |
+| Shortcuts | graphicgene's own, close to Figma's, or Illustrator's — pick in the menu behind the theme button. They differ only where noted below |
 | Text | Click to type; double-click text or press `Enter` to edit it; `Esc` or a click away to finish. Fonts load as the text needs them |
 | Drag with a shape tool | Draw it — `Shift` for equal sides, `Alt` from the centre |
 | Snapping | Moving and drawing catch on other layers' and the artboard's edges and centres, with a red guide; hold `Ctrl/⌘` to skip it for one drag, `Ctrl/⌘ U` or the zoom menu to turn it off |
 | Pen | Click for a corner, drag for a curve; click the first point to close, `Enter` to finish |
+| Direct select | Click a shape — inside a group too — to edit its points: drag a point straight away, or the shape by its outline or inside |
+| Eyedropper | Click a layer: the selection takes its fill and stroke |
+| `D`, `Shift X` | Paint the selection white with a black stroke (text black); swap fill and stroke colours |
 | Double-click a path | Edit its points: drag points and handles, click a segment to add a point, double-click a point for corner/curve; `Esc`, `Enter` or a click away from the path to finish |
 | Handles on a selection | Scale (`Shift` keeps proportions, `Alt` from the centre); just outside a corner rotates (`Shift` snaps to 15°) |
+| `Alt`+drag | Move a copy, leaving the original |
 | Arrow keys | Nudge 1px, 10px with `Shift` |
 | Properties panel | The buttons at the top align the selection — several layers with each other, one with the artboard — or space three or more out evenly. Type a value and press `Enter`; `↑` `↓` step it (`Shift` for 10); drag a field's label sideways to scrub; `Esc` puts back what was being typed or scrubbed |
 | Colour swatch | Opens a picker: drag in the square or along the hue and opacity strips, or pick a preset |
 | Layers panel | Double-click a name to rename it; the eye and lock on a row hide and lock it; drag rows to reorder, onto the middle of a group to put them inside; right-click for more |
-| `Ctrl/⌘ C` `X` `V`, `Ctrl/⌘ D` or `J` | Copy, cut, paste — in place, into this document or another tab's — and duplicate |
+| `Ctrl/⌘ C` `X` `V`, `Ctrl/⌘ D` or `J` | Copy, cut, paste — in place, into this document or another tab's — and duplicate. In Illustrator's shortcuts `Ctrl/⌘ D` is Transform Again: the last move once more, copying again after an `Alt`-drag |
+| `Ctrl/⌘ F` `B` (Illustrator's) | Paste in front of or behind the selection, in place — what was last copied or pasted here |
 | `Ctrl/⌘ G`, `Ctrl/⌘ Shift G` | Group, ungroup |
 | `Ctrl/⌘ ]` `[`, with `Shift` | Bring forward, send backward — with `Shift`, to the front or back |
 | `Ctrl/⌘ Shift H`, `Ctrl/⌘ Shift L` | Hide or show, lock or unlock the selection |
 | Scroll, `Space`+drag, middle-drag | Pan |
 | `Ctrl/⌘`+scroll, pinch | Zoom about the pointer |
-| `Ctrl/⌘ +` `−` `0`, `Shift 1` | Zoom in, out, to 100%, to fit the artboard |
-| `Ctrl/⌘ Z`, `Ctrl/⌘ Shift Z` | Undo, redo |
+| `Ctrl/⌘ +` `−` `0`, `Shift 1` | Zoom in, out, to 100%, to fit the artboard — in Illustrator's shortcuts `Ctrl/⌘ 1` is 100% and `Ctrl/⌘ 0` fits |
+| Zoom menu → Outlines | Every shape as a thin line, unfilled — `Ctrl/⌘ Y` in Illustrator's shortcuts |
+| `Ctrl/⌘ Z`, `Ctrl/⌘ Shift Z` or `Y` | Undo, redo (`Y` is outlines in Illustrator's shortcuts) |
 | `Ctrl/⌘ O`, `Ctrl/⌘ Shift E` | Open a project file, export SVG |
 | Export menu | SVG, or PNG at 1×, 2× or 3×, with or without the white page |
 

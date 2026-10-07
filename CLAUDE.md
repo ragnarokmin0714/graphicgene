@@ -34,23 +34,27 @@ the installers; `v0.4.2` fixed issues #1 and #2), put the same web app in a
 desktop window
 (Tauri, `apps/desktop`): only storage differs — the autosave is a file, and
 projects and exports go through the system's open and save dialogs — and
-the core did not change.
+the core did not change. v0.5, editing basics, is tagged `v0.5.0`: align
+and distribute, stroke styles, gradient fills, snapping with smart guides,
+and issue #3's Illustrator shortcuts — a second keymap, direct select, the
+eyedropper and hand tools, Alt-drag copies, Transform Again, paste in
+front and behind, and outline view.
 What is next, and the known architectural debt, is in `ROADMAP.md`.
 
 **Verified — the bar for any change:**
 
-- `cargo test --workspace` — 164 tests, including a randomized check that
+- `cargo test --workspace` — 178 tests, including a randomized check that
   incremental redraws equal full redraws pixel for pixel, through a zoomed
   view too
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - the web build (`tsc -b` + Vite)
 - `pnpm smoke` — the real wasm module end to end, asserting on pixels
-- `pnpm ui` — the React app driven in jsdom against the real core: 232
+- `pnpm ui` — the React app driven in jsdom against the real core: 259
   checks, including zoom and pan, the properties panel and its colour
   picker, the layer panel's rename, toggles and drag to reorder, the
   clipboard, the desktop app's storage through a stand-in for its Rust
-  commands, and that the canvas equals a full redraw of the same document
-  at the same view
+  commands, both keymaps and keys typed with Zhuyin on, and that the
+  canvas equals a full redraw of the same document at the same view
 - for `apps/desktop`, in its own directory: `cargo fmt -- --check`,
   `cargo clippy --all-targets -- -D warnings`, `cargo test`. These need the
   system webview's development libraries (below); the Desktop workflow runs
@@ -278,12 +282,16 @@ Two rules keep it from spreading where it does not belong:
 
 Theme is a per-viewer preference, not document state: `useTheme.ts` keeps it
 in React and localStorage, and an inline script in `index.html` applies it
-before first paint. Keep the two in sync. Keyboard shortcuts go through
-`useShortcuts` in `shortcuts.ts`, which already skips text fields and keys a
+before first paint. Keep the two in sync. So is the keymap — graphicgene's
+own or Illustrator's (`useKeymap.ts`); a shortcut names a keymap only where
+the two disagree. Keyboard shortcuts go through
+`useShortcuts` in `shortcuts.ts`, which matches a key an input method has
+turned into something else ("Process", a Zhuyin symbol) by its place on the
+keyboard, and already skips text fields and keys a
 control has handled (`preventDefault`: the Escape that ends a scrub or
 closes a popover must not also deselect) — do not add ad-hoc `keydown`
 listeners. The exceptions change what a drag does rather than run a
-command: Shift and Alt during a drag and Space held for panning
+command: Shift and Alt during a drag and Space held — or the hand tool — for panning
 (`Stage.tsx`), and Escape during a scrub or a colour drag (`fields.tsx`,
 `ColorPicker.tsx`). The backdrop colour reaches the core from the
 `--canvas-backdrop` token (`backdrop.ts`), re-read when the theme changes.
@@ -420,7 +428,7 @@ demands them, not in advance.
 The core modules in the order data flows: `doc` (arena + change log),
 `command` (journal), `session` (the rules), then what the session drives —
 `selection`, `hit`, `gesture`, `anchors`, `pen`, `path_edit`, `properties`,
-`layers`, `align`, `snap`, `clipboard` — then `fonts` and `text`, and the outputs: `layout`,
+`layers`, `align`, `snap`, `appearance`, `clipboard` — then `fonts` and `text`, and the outputs: `layout`,
 `svg`, `project`. `testing` (behind a feature, for tests only) builds a font
 in code.
 
@@ -507,11 +515,15 @@ Current shipped size, so regressions are visible rather than gradual:
 
 | Asset | Raw | Gzip |
 |---|---|---|
-| wasm (wasm-opt applied) | 999 KB | 393 KB |
-| js (React + Radix + app) | 467 KB | 150 KB |
+| wasm (wasm-opt applied) | 1,081 KB | 428 KB |
+| js (React + Radix + app) | 481 KB | 154 KB |
 | js chunk: Noto Sans TC's unicode ranges, fetched after start-up | 82 KB | 34 KB |
-| css (incl. tw-animate-css) | 45 KB | 8 KB |
+| css (incl. tw-animate-css) | 45 KB | 9 KB |
 | font (Inter, latin subset) | 48 KB | — |
+
+The wasm was 999 KB / 393 KB at v0.3; v0.5 added 82 KB / 35 KB — mostly
+tiny-skia's gradient shaders and dash code, which gradients and dashed
+strokes stopped the linker from stripping, and the new core modules.
 
 The browser fetches only the Inter subsets whose unicode-range the page uses,
 so the other subset files in `dist/` cost nothing unless that script appears.
