@@ -204,7 +204,7 @@ fn draw_scene(
     }
     for item in &scene.items {
         if intersects(device_area(view, item.bounds), area) {
-            draw(builder, item, view, canvas);
+            draw(builder, item, view, scene.outline, canvas);
         }
     }
 }
@@ -279,7 +279,16 @@ pub fn scroll(target: &mut Pixmap, dx: i32, dy: i32) -> Vec<PixelRect> {
     exposed
 }
 
-fn draw(builder: &mut PathBuilder, item: &RenderItem, view: Affine, canvas: &mut PixmapMut) {
+/// What outline view draws every path in.
+const OUTLINE_COLOR: LinearRgba = LinearRgba::BLACK;
+
+fn draw(
+    builder: &mut PathBuilder,
+    item: &RenderItem,
+    view: Affine,
+    outline: bool,
+    canvas: &mut PixmapMut,
+) {
     let mut path = std::mem::take(builder);
     append_path(&mut path, &item.path);
     let Some(path) = path.finish() else {
@@ -290,6 +299,24 @@ fn draw(builder: &mut PathBuilder, item: &RenderItem, view: Affine, canvas: &mut
     // Composed in f64 before narrowing, so zooming does not compound the
     // f32 rounding of two separate transforms.
     let transform = to_sk_transform(view * item.transform);
+
+    if outline {
+        // Width 0 is tiny-skia's hairline: one device pixel at any zoom,
+        // whatever the item's own transform. Opacity does not apply — the
+        // point is to see every shape.
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Default::default()
+        };
+        paint.set_color(to_sk_color(OUTLINE_COLOR, 1.0));
+        let hairline = SkStroke {
+            width: 0.0,
+            ..Default::default()
+        };
+        canvas.stroke_path(&path, &paint, &hairline, transform, None);
+        *builder = path.clear();
+        return;
+    }
 
     if let Some(fill) = &item.fill {
         let mut paint = Paint {

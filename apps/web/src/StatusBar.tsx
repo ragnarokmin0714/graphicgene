@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { type Keymap, MOD, SHIFT } from "@/shortcuts";
 
-/** The view: zoom, and snapping — per-viewer settings the core keeps, never saved. */
+/** The view: zoom, snapping and outlines — per-viewer settings the core keeps, never saved. */
 export type ViewActions = {
   zoomIn: () => void;
   zoomOut: () => void;
@@ -19,6 +19,8 @@ export type ViewActions = {
   zoomToFit: () => void;
   snapping: boolean;
   toggleSnapping: () => void;
+  outline: boolean;
+  toggleOutline: () => void;
 };
 
 type Props = {
@@ -114,6 +116,10 @@ function ViewMenu({ zoom, actions, keymap }: { zoom: number; actions: ViewAction
         <DropdownMenuCheckboxItem checked={actions.snapping} onCheckedChange={actions.toggleSnapping}>
           Snap to layers
           <DropdownMenuShortcut>{MOD} U</DropdownMenuShortcut>
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem checked={actions.outline} onCheckedChange={actions.toggleOutline}>
+          Outlines
+          {illustrator && <DropdownMenuShortcut>{MOD} Y</DropdownMenuShortcut>}
         </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>

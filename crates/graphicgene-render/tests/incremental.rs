@@ -120,9 +120,10 @@ fn backdrop() -> LinearRgba {
     LinearRgba::from_srgb8(200, 200, 200, 255)
 }
 
-fn full_render(doc: &Document, view: Affine, width: u32, height: u32) -> Pixmap {
+fn full_render(doc: &Document, view: Affine, width: u32, height: u32, outline: bool) -> Pixmap {
     let mut scene = RenderScene::build(doc).unwrap();
     scene.background = Some(backdrop());
+    scene.outline = outline;
     let mut pixmap = Pixmap::new(width, height).unwrap();
     CpuRenderer::new()
         .render(
@@ -151,12 +152,28 @@ fn max_difference(a: &Pixmap, b: &Pixmap) -> u8 {
 #[test]
 fn incremental_redraws_match_a_full_redraw_through_random_edits() {
     let zoomed = Affine::translate((23.0, -17.0)) * Affine::scale(1.5);
-    random_edits(160, 120, 400, 0x9E37_79B9_7F4A_7C15, Affine::IDENTITY);
-    random_edits(640, 480, 120, 0xD1B5_4A32_D192_ED03, Affine::IDENTITY);
-    random_edits(640, 480, 120, 0x2545_F491_4F6C_DD1D, zoomed);
+    random_edits(
+        160,
+        120,
+        400,
+        0x9E37_79B9_7F4A_7C15,
+        Affine::IDENTITY,
+        false,
+    );
+    random_edits(
+        640,
+        480,
+        120,
+        0xD1B5_4A32_D192_ED03,
+        Affine::IDENTITY,
+        false,
+    );
+    random_edits(640, 480, 120, 0x2545_F491_4F6C_DD1D, zoomed, false);
+    // Outline view: hairlines are thin enough to expose any seam.
+    random_edits(640, 480, 120, 0x6A09_E667_F3BC_C908, zoomed, true);
 }
 
-fn random_edits(width: u32, height: u32, steps: usize, seed: u64, view: Affine) {
+fn random_edits(width: u32, height: u32, steps: usize, seed: u64, view: Affine, outline: bool) {
     let mut rng = Rng(seed);
     let mut doc = Document::new();
     let root = doc.root();
@@ -172,6 +189,7 @@ fn random_edits(width: u32, height: u32, steps: usize, seed: u64, view: Affine) 
 
     let mut scene = RenderScene::default();
     scene.background = Some(backdrop());
+    scene.outline = outline;
     let mut renderer = CpuRenderer::new();
     let mut pixels = Pixmap::new(width, height).unwrap();
     let full = Rect::new(0.0, 0.0, width.into(), height.into());
@@ -238,7 +256,7 @@ fn random_edits(width: u32, height: u32, steps: usize, seed: u64, view: Affine) 
             renderer.render(&scene, view, dirty, &mut pixels).unwrap();
         }
 
-        let reference = full_render(&doc, view, width, height);
+        let reference = full_render(&doc, view, width, height, outline);
         let diff = max_difference(&pixels, &reference);
         assert_eq!(
             diff, 0,
@@ -375,7 +393,7 @@ fn pan_against_full_redraws(doc: &Document) -> (u8, f64) {
                 .render(&scene, view, strip.bounds(), &mut pixels)
                 .unwrap();
         }
-        let reference = full_render(doc, view, width, height);
+        let reference = full_render(doc, view, width, height, false);
         worst = worst.max(max_difference(&pixels, &reference));
         let off = pixels
             .data()

@@ -211,6 +211,21 @@ impl Editor {
         }
     }
 
+    /// Whether every shape is drawn as a thin outline, unfilled.
+    pub fn outline(&self) -> bool {
+        self.scene.outline
+    }
+
+    /// Outline view on or off — the viewer's choice, like the backdrop, so
+    /// it redraws everything and is never saved.
+    #[wasm_bindgen(js_name = setOutline)]
+    pub fn set_outline(&mut self, on: bool) {
+        if self.scene.outline != on {
+            self.scene.outline = on;
+            self.shown = None;
+        }
+    }
+
     // ---- Document and history ------------------------------------------------
 
     /// Add a rectangle. Returns the new node's id as a string the UI can hold.

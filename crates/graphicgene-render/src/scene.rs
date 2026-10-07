@@ -69,6 +69,10 @@ pub struct RenderScene {
     pub background: Option<LinearRgba>,
     /// Taken from the document on every rebuild.
     pub artboard: Option<Artboard>,
+    /// Draw every item as a hairline of its path, unfilled — Illustrator's
+    /// outline view, for finding shapes under others. Per-viewer, like
+    /// `background`: a renderer reads it, the document never holds it.
+    pub outline: bool,
     /// Where each vector node's item is in `items`.
     index: HashMap<NodeId, usize>,
 }

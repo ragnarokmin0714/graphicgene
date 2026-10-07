@@ -351,6 +351,8 @@ export function App() {
     zoomToFit: () => run((editor) => editor.zoomToFit()),
     snapping: core?.snapping ?? true,
     toggleSnapping: () => run((editor) => editor.setSnapping(!editor.snapping)),
+    outline: core?.outline ?? false,
+    toggleOutline: () => run((editor) => editor.setOutline(!editor.outline)),
   };
 
   useShortcuts(
@@ -388,7 +390,8 @@ export function App() {
       { key: "l", mod: true, shift: true, run: layerActions.toggleLocked },
       { key: "z", mod: true, run: undo },
       { key: "z", mod: true, shift: true, run: redo },
-      { key: "y", mod: true, run: redo },
+      { key: "y", mod: true, keymap: "default", run: redo },
+      { key: "y", mod: true, keymap: "illustrator", run: viewActions.toggleOutline },
       { key: "s", mod: true, run: () => void save(true) },
       // "=" is where "+" lives unshifted; the numpad's "+" needs no Shift.
       { key: "=", mod: true, run: viewActions.zoomIn },

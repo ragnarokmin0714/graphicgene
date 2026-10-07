@@ -657,6 +657,15 @@ export class EditorHandle {
     this.inner.setSnapping(on);
   }
 
+  /** Whether every shape is drawn as a thin outline, unfilled. A viewer's choice, not saved. */
+  get outline(): boolean {
+    return this.inner.outline();
+  }
+
+  setOutline(on: boolean): void {
+    this.inner.setOutline(on);
+  }
+
   /** Changes whenever `layers()` may have: cache the rows on it. */
   get layersVersion(): string {
     return this.inner.layersVersion();

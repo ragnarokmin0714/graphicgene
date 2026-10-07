@@ -355,8 +355,9 @@ try {
   /**
    * The canvas must show exactly what a full redraw of the same document
    * draws: every changed region was redrawn in the core and put on screen.
+   * `outline` is what the reference draws in: the app must match it.
    */
-  const checkScreen = async (label) => {
+  const checkScreen = async (label, { outline = false } = {}) => {
     // Let a pan settle: shifted pixels are only exact after that redraw.
     await wait(200);
     const text = await downloadProject();
@@ -368,6 +369,7 @@ try {
     reference.setViewport(canvas().width, canvas().height, 1);
     reference.setView(zoom, panX, panY);
     reference.setBackdrop(...resolveBackdrop());
+    reference.setOutline(outline);
     reference.render();
     const expected = reference.pixels();
     const { pixels } = screenOf(canvas());
@@ -1086,6 +1088,10 @@ try {
   check(view()[0] > 1, `then Ctrl+0 fits the artboard (${zoomed()})`);
   await key("1", { ctrlKey: true });
   check(zoomed() === "100%", "and Ctrl+1 is 100%");
+  await key("y", { ctrlKey: true });
+  await checkScreen("Ctrl+Y shows outlines", { outline: true });
+  await key("y", { ctrlKey: true });
+  await checkScreen("and again puts the paint back");
   await pickKeymap("graphicgene");
   check(localStorage.getItem("graphicgene:keymap") === null, "back to graphicgene's, nothing stored");
   await key("!", { code: "Digit1", shiftKey: true });
