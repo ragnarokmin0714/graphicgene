@@ -304,3 +304,119 @@ fn hovering_reports_only_changes() {
         "no hover while drawing"
     );
 }
+
+#[test]
+fn direct_selection_reaches_into_groups_and_edits_points() {
+    let mut session = Session::new();
+    let first = square(&mut session);
+    let second = session
+        .insert(Node::vector(
+            "Other",
+            Rect::new(100.0, 0.0, 120.0, 20.0).to_path(0.1),
+            Some(RED),
+        ))
+        .unwrap();
+    session.select_all().unwrap();
+    session.group_selection().unwrap();
+    session.clear_selection().unwrap();
+
+    session.set_tool(Tool::Direct).unwrap();
+    session.pointer_move(at(110.0, 10.0)).unwrap();
+    let hover = session.overlay().unwrap().hover.expect("hovering a shape");
+    assert_eq!(hover.bounding_box().x0, 100.0, "the shape, not its group");
+    click(&mut session, at(110.0, 10.0));
+    assert_eq!(session.selection().ids(), &[second], "the shape itself");
+    assert_eq!(session.mode(), Some(Mode::PathEdit));
+
+    // A press on another shape's corner drags that point at once.
+    drag(&mut session, at(0.0, 0.0), at(-10.0, -5.0), None);
+    assert_eq!(session.selection().ids(), &[first]);
+    let path = session.document().vector_path(first).unwrap().clone();
+    let b = path.bounding_box();
+    assert_eq!((b.x0, b.y0, b.x1, b.y1), (-10.0, -5.0, 20.0, 20.0));
+    assert_eq!(session.tool(), Tool::Direct, "the tool stays in hand");
+    session.undo().unwrap();
+    let b = session
+        .document()
+        .vector_path(first)
+        .unwrap()
+        .bounding_box();
+    assert_eq!((b.x0, b.y0), (0.0, 0.0), "one undo step");
+}
+
+#[test]
+fn direct_selection_drags_a_shape_by_its_edge_without_adding_a_point() {
+    let mut session = Session::new();
+    let id = square(&mut session);
+    let elements = session.document().vector_path(id).unwrap().elements().len();
+    session.set_tool(Tool::Direct).unwrap();
+    // The middle of the top edge, not yet being edited: the whole shape.
+    drag(&mut session, at(10.0, 0.0), at(40.0, 40.0), None);
+    assert_eq!(frame(&session).0, Point::new(30.0, 40.0));
+    let path = session.document().vector_path(id).unwrap();
+    assert_eq!(path.elements().len(), elements, "no point inserted");
+    assert_eq!(session.mode(), Some(Mode::PathEdit));
+
+    // Inside it, while editing, the whole shape too.
+    drag(&mut session, at(40.0, 50.0), at(60.0, 50.0), None);
+    assert_eq!(frame(&session).0, Point::new(50.0, 40.0));
+
+    // On nothing: editing stops, and a marquee picks the shape back up.
+    drag(&mut session, at(200.0, 200.0), at(55.0, 45.0), None);
+    assert_eq!(session.mode(), None);
+    assert_eq!(session.selection().ids(), &[id]);
+}
+
+#[test]
+fn the_eyedropper_paints_the_selection_like_what_it_clicks() {
+    use graphicgene_core::node::{Dash, NodeKind, Stroke};
+    use graphicgene_core::paint::Paint;
+    const BLUE: LinearRgba = LinearRgba::new(0.0, 0.0, 1.0, 1.0);
+
+    let mut session = Session::new();
+    let target = square(&mut session);
+    let mut source = Node::vector(
+        "Source",
+        Rect::new(100.0, 0.0, 120.0, 20.0).to_path(0.1),
+        Some(BLUE),
+    );
+    let stroke = Stroke {
+        dash: Some(Dash {
+            length: 4.0,
+            gap: 2.0,
+        }),
+        ..Stroke::solid(RED, 3.0)
+    };
+    if let NodeKind::Vector(v) = &mut source.kind {
+        v.stroke = Some(stroke);
+    }
+    session.insert(source).unwrap();
+    click(&mut session, at(10.0, 10.0));
+    session.set_tool(Tool::Eyedropper).unwrap();
+
+    let paint = |session: &Session| match &session.document().get(target).unwrap().kind {
+        NodeKind::Vector(v) => (v.fill.clone(), v.stroke),
+        _ => unreachable!(),
+    };
+    let before = paint(&session);
+    click(&mut session, at(60.0, 60.0));
+    assert_eq!(paint(&session), before, "nothing there, nothing taken");
+
+    click(&mut session, at(110.0, 10.0));
+    assert_eq!(paint(&session), (Some(Paint::Solid(BLUE)), Some(stroke)));
+    assert_eq!(session.selection().ids(), &[target], "the selection stays");
+    assert_eq!(session.tool(), Tool::Eyedropper, "and so does the tool");
+    session.undo().unwrap();
+    assert_eq!(paint(&session), before, "one undo step");
+}
+
+#[test]
+fn a_press_with_the_hand_tool_is_the_shells_alone() {
+    let mut session = Session::new();
+    let id = square(&mut session);
+    session.set_tool(Tool::Hand).unwrap();
+    drag(&mut session, at(10.0, 10.0), at(50.0, 50.0), None);
+    assert!(session.selection().is_empty(), "nothing selected");
+    let b = session.document().world_bounds(id).unwrap();
+    assert_eq!((b.x0, b.y0), (0.0, 0.0), "nothing moved");
+}

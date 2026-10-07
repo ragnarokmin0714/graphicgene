@@ -24,6 +24,7 @@ mod tools;
 use std::fmt;
 
 use crate::align::{self, Align, Distribute};
+use crate::appearance::{self, Appearance};
 use crate::clipboard;
 use crate::color::LinearRgba;
 use crate::command::{Command, Journal};
@@ -441,10 +442,15 @@ impl Session {
         Ok(())
     }
 
-    /// Track the node under the pointer. Returns whether that changed, so a
-    /// view only redraws the overlay when it has to.
+    /// Track the node under the pointer — the one a press would select, so
+    /// with the direct selection tool, inside groups. Returns whether that
+    /// changed, so a view only redraws the overlay when it has to.
     pub fn hover(&mut self, point: Point, tolerance: f64) -> Result<bool> {
-        let hit = hit::hit_test(&self.document, point, tolerance)?;
+        let hit = if self.tool == Tool::Direct {
+            hit::hit_test_deep(&self.document, point, tolerance)?
+        } else {
+            hit::hit_test(&self.document, point, tolerance)?
+        };
         let changed = hit != self.hover;
         self.hover = hit;
         Ok(changed)
@@ -925,6 +931,37 @@ impl Session {
     pub fn distribute_selection(&mut self, axis: Distribute) -> Result<bool> {
         self.end_interaction()?;
         let command = align::distribute_command(&self.document, self.selection.ids(), axis)?;
+        self.execute_some(command)
+    }
+
+    // ---- Paint as a whole ----------------------------------------------------------
+
+    /// A press with the eyedropper: the selection takes the fill and stroke
+    /// of the layer under `point` — the shape itself, inside a group too.
+    /// One undo step; false if nothing was there, or nothing changed.
+    pub fn eyedrop(&mut self, point: Point, tolerance: f64) -> Result<bool> {
+        self.cancel_property()?;
+        let Some(source) = hit::hit_test_deep(&self.document, point, tolerance)? else {
+            return Ok(false);
+        };
+        let Some(appearance) = Appearance::of(&self.document, source)? else {
+            return Ok(false);
+        };
+        let command = appearance::apply_command(&self.document, self.selection.ids(), &appearance)?;
+        self.execute_some(command)
+    }
+
+    /// Paint the selection with the defaults (see `appearance`).
+    pub fn default_paint(&mut self) -> Result<bool> {
+        self.end_interaction()?;
+        let command = appearance::default_command(&self.document, self.selection.ids())?;
+        self.execute_some(command)
+    }
+
+    /// Swap the selection's fill and stroke colours (see `appearance`).
+    pub fn swap_paint(&mut self) -> Result<bool> {
+        self.end_interaction()?;
+        let command = appearance::swap_command(&self.document, self.selection.ids())?;
         self.execute_some(command)
     }
 

@@ -1,4 +1,4 @@
-import { Circle, MousePointer2, PenTool, Redo2, Square, Type, Undo2 } from "lucide-react";
+import { Circle, Hand, MousePointer, MousePointer2, PenTool, Pipette, Redo2, Square, Type, Undo2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import type { Tool } from "@/editor";
 import { IconButton } from "@/IconButton";
@@ -18,10 +18,13 @@ type Props = {
 
 const TOOLS: { tool: Tool; label: string; icon: React.ReactNode; key: string; illustrator?: string }[] = [
   { tool: "select", label: "Select", icon: <MousePointer2 />, key: "V" },
+  { tool: "direct", label: "Direct select", icon: <MousePointer />, key: "A" },
   { tool: "rect", label: "Rectangle", icon: <Square />, key: "R", illustrator: "M" },
   { tool: "ellipse", label: "Ellipse", icon: <Circle />, key: "O", illustrator: "L" },
   { tool: "pen", label: "Pen", icon: <PenTool />, key: "P" },
   { tool: "text", label: "Text", icon: <Type />, key: "T" },
+  { tool: "eyedropper", label: "Eyedropper", icon: <Pipette />, key: "I" },
+  { tool: "hand", label: "Hand", icon: <Hand />, key: "H" },
 ];
 
 /**

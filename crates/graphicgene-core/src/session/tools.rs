@@ -5,8 +5,8 @@
 //! selection handle its own hit-test found under a press — handles are
 //! screen-sized, so finding them is the view's job — and the session routes
 //! them: the pen, point editing, a drag on the selection, a new shape, a
-//! marquee. The shell keeps only what is its own: panning the view, and the
-//! cursor.
+//! marquee. The shell keeps only what is its own: panning the view — with
+//! the hand tool too, whose presses never reach here — and the cursor.
 
 use crate::color::LinearRgba;
 use crate::error::Result;
@@ -26,10 +26,17 @@ pub const PEN_STROKE_WIDTH: f64 = 2.0;
 pub enum Tool {
     #[default]
     Select,
+    /// Illustrator's direct selection: straight to a shape's points, and to
+    /// shapes inside groups.
+    Direct,
     Rect,
     Ellipse,
     Pen,
     Text,
+    /// Gives the selection the fill and stroke of the layer clicked.
+    Eyedropper,
+    /// Drags the view; the shell pans, so the session ignores its presses.
+    Hand,
 }
 
 /// The selection handle under a press, as the shell's hit-test found it.
@@ -60,8 +67,9 @@ pub(super) enum Route {
     Pen,
     Path,
     Gesture,
-    /// A press that started typing: nothing to drag.
-    Text,
+    /// A press that did all it does — started typing, or took colours:
+    /// nothing to drag.
+    Tap,
 }
 
 impl Session {
@@ -97,6 +105,9 @@ impl Session {
             self.commit_text()?;
             self.tool = Tool::Select;
         }
+        if self.tool == Tool::Hand {
+            return Ok(());
+        }
         let route = if self.tool == Tool::Text {
             match hit::hit_test_deep(&self.document, point, at.hit_tolerance)? {
                 Some(id) if self.is_text(id)? => {
@@ -106,7 +117,12 @@ impl Session {
                     self.begin_text(point, color)?;
                 }
             }
-            Route::Text
+            Route::Tap
+        } else if self.tool == Tool::Eyedropper {
+            self.eyedrop(point, at.hit_tolerance)?;
+            Route::Tap
+        } else if self.tool == Tool::Direct {
+            self.direct_press(at)?
         } else if self.tool == Tool::Pen {
             let stroke = Stroke::solid(color, PEN_STROKE_WIDTH);
             self.pen_press(point, modifiers.shift, at.pick_tolerance, stroke)?;
@@ -156,9 +172,9 @@ impl Session {
             Some(Route::Pen) => self.pen_drag(point, modifiers.shift)?,
             Some(Route::Path) => self.path_drag(point, modifiers)?,
             Some(Route::Gesture) => self.update_gesture(point, modifiers)?,
-            Some(Route::Text) => return Ok(false),
+            Some(Route::Tap) => return Ok(false),
             None if self.tool == Tool::Pen => return Ok(self.pen_hover(point, at.pick_tolerance)),
-            None if self.tool == Tool::Select && self.mode().is_none() => {
+            None if matches!(self.tool, Tool::Select | Tool::Direct) && self.mode().is_none() => {
                 return self.hover(point, at.hit_tolerance);
             }
             None => return Ok(false),
@@ -176,7 +192,7 @@ impl Session {
                 false
             }
             Some(Route::Gesture) => self.end_gesture()?.is_some(),
-            Some(Route::Text) | None => false,
+            Some(Route::Tap) | None => false,
         };
         if finished {
             self.tool = Tool::Select;
@@ -192,17 +208,17 @@ impl Session {
             Some(Route::Gesture) => {
                 self.cancel_gesture()?;
             }
-            Some(Route::Pen | Route::Text) | None => {}
+            Some(Route::Pen | Route::Tap) | None => {}
         }
         Ok(())
     }
 
-    /// A double-click with the select tool types into selected text, or
-    /// edits a path's points; while editing points, it toggles one between
-    /// corner and curve, or stops on empty space. The one that finishes a
-    /// pen path is not one of these.
+    /// A double-click with either selection tool types into selected text,
+    /// or edits a path's points; while editing points, it toggles one
+    /// between corner and curve, or stops on empty space. The one that
+    /// finishes a pen path is not one of these.
     pub fn double_click(&mut self, at: Pointer) -> Result<()> {
-        if self.tool != Tool::Select || self.last_route == Some(Route::Pen) {
+        if !self.selecting() || self.last_route == Some(Route::Pen) {
             return Ok(());
         }
         if self.mode() == Some(Mode::PathEdit) {
@@ -241,7 +257,7 @@ impl Session {
             if matches!(self.tool, Tool::Pen | Tool::Text) {
                 self.tool = Tool::Select;
             }
-        } else if self.tool == Tool::Select && !self.edit_selected_text()? {
+        } else if self.selecting() && !self.edit_selected_text()? {
             self.begin_path_edit()?;
         }
         Ok(())
@@ -266,6 +282,57 @@ impl Session {
         }
         self.end_path_edit()?;
         Ok(false)
+    }
+
+    /// A press with the direct selection tool, which works on points. On a
+    /// point, a handle or the outline of the path being edited, it edits
+    /// them, as point editing does. On any other shape — inside a group too
+    /// — it selects that shape and edits its points, dragging the point
+    /// pressed, or else the whole shape, rather than inserting a point where
+    /// it was grabbed; on text it selects and drags the text. On nothing it
+    /// stops editing and draws a marquee.
+    fn direct_press(&mut self, at: Pointer) -> Result<Route> {
+        let Pointer {
+            point, modifiers, ..
+        } = at;
+        if self.mode() == Some(Mode::PathEdit) {
+            let outcome = self.path_press(point, at.pick_tolerance, modifiers.shift)?;
+            if outcome != PressOutcome::Miss || modifiers.shift {
+                return Ok(Route::Path);
+            }
+        }
+        let editing = self.path_edit.as_ref().map(PathEdit::id);
+        let hit = hit::hit_test_deep(&self.document, point, at.hit_tolerance)?;
+        match hit {
+            Some(id) if Some(id) != editing => {
+                self.end_path_edit()?;
+                self.cancel_property()?;
+                self.selection.set([id]);
+                self.clear_hover();
+                let picks = self.begin_path_edit()?
+                    && self.path_edit.as_ref().map_or(Ok(false), |edit| {
+                        edit.picks_point(&self.document, point, at.pick_tolerance)
+                    })?;
+                if picks {
+                    self.path_press(point, at.pick_tolerance, false)?;
+                    return Ok(Route::Path);
+                }
+                self.begin_transform(TransformKind::Move, point)?;
+            }
+            Some(_) => {
+                self.begin_transform(TransformKind::Move, point)?;
+            }
+            None => {
+                self.end_path_edit()?;
+                self.begin_marquee(point, modifiers.shift)?;
+            }
+        }
+        Ok(Route::Gesture)
+    }
+
+    /// The select tool, or the direct selection tool.
+    fn selecting(&self) -> bool {
+        matches!(self.tool, Tool::Select | Tool::Direct)
     }
 
     /// Type into the one selected node, if it is text.

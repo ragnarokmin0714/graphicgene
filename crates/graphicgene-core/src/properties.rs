@@ -27,7 +27,7 @@ use crate::text::{TextAlign, TextNode, TextStyle};
 /// scaled to nothing could never be scaled back.
 const MIN_EXTENT: f64 = 0.01;
 /// A stroke added by picking a colour gets this width.
-const DEFAULT_STROKE_WIDTH: f64 = 1.0;
+pub(crate) const DEFAULT_STROKE_WIDTH: f64 = 1.0;
 /// The smallest font size a field can set, in document units.
 const MIN_FONT_SIZE: f64 = 1.0;
 /// The tightest line height a field can set, as a multiple of the size.

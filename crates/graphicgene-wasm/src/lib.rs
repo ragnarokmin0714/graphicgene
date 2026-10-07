@@ -532,6 +532,19 @@ impl Editor {
         self.session.distribute_selection(axis).map_err(to_js)
     }
 
+    /// Paint the selection with the defaults: white filled and stroked black,
+    /// text black. One undo step.
+    #[wasm_bindgen(js_name = defaultPaint)]
+    pub fn default_paint(&mut self) -> Result<bool, JsError> {
+        self.session.default_paint().map_err(to_js)
+    }
+
+    /// Swap the selection's fill and stroke colours. One undo step.
+    #[wasm_bindgen(js_name = swapPaint)]
+    pub fn swap_paint(&mut self) -> Result<bool, JsError> {
+        self.session.swap_paint().map_err(to_js)
+    }
+
     /// Put the selection in a new group, which becomes the selection.
     pub fn group(&mut self) -> Result<bool, JsError> {
         self.session.group_selection().map_err(to_js)
@@ -760,15 +773,19 @@ impl Editor {
     // decides what a press starts, for the tool in hand. `hit` and `pick`
     // are the screen distances that count as on a shape and on a point.
 
-    /// "select", "rect", "ellipse" or "pen".
+    /// "select", "direct", "rect", "ellipse", "pen", "text", "eyedropper"
+    /// or "hand".
     #[wasm_bindgen(getter)]
     pub fn tool(&self) -> String {
         match self.session.tool() {
             Tool::Select => "select",
+            Tool::Direct => "direct",
             Tool::Rect => "rect",
             Tool::Ellipse => "ellipse",
             Tool::Pen => "pen",
             Tool::Text => "text",
+            Tool::Eyedropper => "eyedropper",
+            Tool::Hand => "hand",
         }
         .to_owned()
     }
@@ -778,11 +795,18 @@ impl Editor {
     pub fn set_tool(&mut self, tool: &str) -> Result<(), JsError> {
         let tool = match tool {
             "select" => Tool::Select,
+            "direct" => Tool::Direct,
             "rect" => Tool::Rect,
             "ellipse" => Tool::Ellipse,
             "pen" => Tool::Pen,
             "text" => Tool::Text,
-            _ => return Err(JsError::new("tool is select, rect, ellipse, pen or text")),
+            "eyedropper" => Tool::Eyedropper,
+            "hand" => Tool::Hand,
+            _ => {
+                return Err(JsError::new(
+                    "tool is select, direct, rect, ellipse, pen, text, eyedropper or hand",
+                ));
+            }
         };
         self.session.set_tool(tool).map_err(to_js)
     }

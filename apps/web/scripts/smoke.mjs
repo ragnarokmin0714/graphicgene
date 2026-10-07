@@ -388,7 +388,12 @@ assert.equal(inspected.setProperty('{"x": 0}'), false, "nothing to apply it to")
   assert.equal(routed.tool, "select", "Escape puts the tool down");
   routed.escape();
   assert.equal(routed.selectionCount(), 0, "then the selection");
-  assert.throws(() => routed.setTool("brush"), /select, rect, ellipse, pen or text/);
+  for (const tool of ["direct", "eyedropper", "hand"]) {
+    routed.setTool(tool);
+    assert.equal(routed.tool, tool, `${tool} round-trips`);
+  }
+  routed.setTool("select");
+  assert.throws(() => routed.setTool("brush"), /select, direct, rect, ellipse, pen, text, eyedropper or hand/);
 
   // Snapping, through the boundary: the artboard's centre is (64, 64) on
   // screen, and a press 3px off it — within the 6px pick distance — lands

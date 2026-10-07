@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolveBackdrop } from "@/backdrop";
 import { Canvas } from "@/Canvas";
-import { PEN_CURSOR } from "@/cursors";
+import { EYEDROPPER_CURSOR, PEN_CURSOR } from "@/cursors";
 import type {
   EditorHandle,
   Frame,
@@ -240,8 +240,10 @@ export function Stage({ editor, revision, run, tool, nextFill }: Props) {
   }, []);
 
   const cursorAt = (p: Point): string => {
-    if (spaceHeld.current) return "grab";
+    if (spaceHeld.current || tool === "hand") return "grab";
     if (tool === "pen") return PEN_CURSOR;
+    if (tool === "eyedropper") return EYEDROPPER_CURSOR;
+    if (tool === "direct") return "default";
     if (tool !== "select") return "crosshair";
     if (mode === "path") return "default";
     const target = overlay?.frame && !overlay.locked ? handleAt(overlay.frame, p) : null;
@@ -250,7 +252,8 @@ export function Stage({ editor, revision, run, tool, nextFill }: Props) {
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!core) return;
-    const pans = event.button === 1 || (event.button === 0 && spaceHeld.current);
+    // The hand tool's presses are panning too: the core never sees them.
+    const pans = event.button === 1 || (event.button === 0 && (spaceHeld.current || tool === "hand"));
     if (event.button !== 0 && !pans) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const p = toScreen(viewportRef.current, event);

@@ -98,6 +98,18 @@ impl PathEdit {
         &self.selected
     }
 
+    /// Whether a press at `point` would pick up a point or a handle, rather
+    /// than land on a segment or miss — asked before the first press into a
+    /// path, which should not insert an anchor where the path was grabbed.
+    pub fn picks_point(&self, doc: &Document, point: Point, tolerance: f64) -> Result<bool> {
+        let (to_local, scale) = self.local_space(doc)?;
+        let anchors = AnchorPath::from_bez(doc.vector_path(self.id)?);
+        Ok(matches!(
+            anchors.hit(to_local * point, tolerance / scale, &self.selected),
+            Some(PathHit::Anchor(_) | PathHit::Handle(..))
+        ))
+    }
+
     /// Whether a press is in progress, i.e. the document holds a preview.
     pub fn is_dragging(&self) -> bool {
         self.drag.is_some()

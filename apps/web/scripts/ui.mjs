@@ -1028,6 +1028,49 @@ try {
   check(pressed("Rectangle") === "true", "M the rectangle");
   await key("v");
 
+  // Two fresh squares, on top of whatever earlier sections left; Ctrl held
+  // so they land exactly where drawn.
+  const layersBeforeTools = layerCount();
+  await key("m");
+  await drag([620, 420], [680, 480], { ctrlKey: true });
+  await key("m");
+  await drag([700, 420], [760, 480], { ctrlKey: true });
+  await key("d");
+  check(
+    value("Fill hex") === "FFFFFF" && value("Stroke hex") === "000000" && value("Stroke width") === "1",
+    "D paints the selection white, stroked black",
+  );
+  await key("X", { shiftKey: true });
+  check(value("Fill hex") === "000000" && value("Stroke hex") === "FFFFFF", "Shift+X swaps fill and stroke");
+
+  await click(650, 450);
+  await key("i");
+  check(pressed("Eyedropper") === "true", "I takes the eyedropper");
+  await click(730, 450);
+  check(
+    value("Fill hex") === "000000" && value("Stroke hex") === "FFFFFF" && frameOf() === "620 420 60 60",
+    `which gives the selection the fill and stroke of what it clicks (${frameOf()})`,
+  );
+
+  await key("a");
+  check(pressed("Direct select") === "true", "A takes the direct selection tool");
+  await drag([620, 420], [610, 400]);
+  check(frameOf() === "610 400 70 80", `which drags the corner pressed, not the shape (${frameOf()})`);
+  check(anchorMarks().length > 0, "and shows the shape's points");
+  await key("Escape");
+
+  await key("h");
+  const viewBeforeHand = view();
+  await pointerAt("pointerdown", 500, 400);
+  await pointerAt("pointermove", 530, 420);
+  await pointerAt("pointerup", 530, 420);
+  const handPan = [1, 2].map((i) => view()[i] - viewBeforeHand[i]).join(" ");
+  check(handPan === "30 20", `H's drag pans (${handPan})`);
+  check(frameOf() === "610 400 70 80", "without touching the selection");
+  await key("v");
+  for (let i = 0; i < 6; i++) await key("z", { ctrlKey: true });
+  check(layerCount() === layersBeforeTools, "undone, a step each");
+
   const pickKeymap = async (label) => {
     const trigger = document.querySelector('header button[aria-label^="Preferences"]');
     await fire(trigger, new window.PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 5 }));

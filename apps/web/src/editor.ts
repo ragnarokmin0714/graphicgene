@@ -187,9 +187,8 @@ export type Overlay = {
 };
 
 /** What the pointer does on the canvas. Session state, kept in the core. */
-export type Tool = "select" | "rect" | "ellipse" | "pen" | "text";
+export type Tool = "select" | "direct" | "rect" | "ellipse" | "pen" | "text" | "eyedropper" | "hand";
 
-/** Modifier keys held during a press or a move. */
 /** Modifier keys held during a press or a move. `ctrl` is Ctrl or ⌘: it turns snapping off while held. */
 export type Keys = { shift: boolean; alt: boolean; ctrl?: boolean };
 
@@ -569,6 +568,16 @@ export class EditorHandle {
   /** Even gaps between three or more selected nodes: one undo step. */
   distribute(axis: Axis): boolean {
     return this.inner.distribute(axis);
+  }
+
+  /** White filled and stroked black, text black — Illustrator's D: one undo step. */
+  defaultPaint(): boolean {
+    return this.inner.defaultPaint();
+  }
+
+  /** Swap the selection's fill and stroke colours: one undo step. */
+  swapPaint(): boolean {
+    return this.inner.swapPaint();
   }
 
   /** Put the selection in a new group, which becomes the selection. */

@@ -10,6 +10,7 @@
 
 pub mod align;
 pub mod anchors;
+pub mod appearance;
 pub mod clipboard;
 pub mod color;
 pub mod command;

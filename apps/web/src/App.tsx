@@ -50,6 +50,12 @@ function hintFor(tool: Tool, mode: EditorMode | null): string | null {
       return "Drag to draw · Shift for equal sides · Alt from the centre";
     case "text":
       return "Click to add text · Click text to type into it";
+    case "direct":
+      return "Click a shape to edit its points, inside groups too · Drag a point, or the shape";
+    case "eyedropper":
+      return "Click a layer: the selection takes its fill and stroke";
+    case "hand":
+      return "Drag to pan";
     default:
       return null;
   }
@@ -350,6 +356,9 @@ export function App() {
   useShortcuts(
     [
       { key: "v", run: () => changeTool("select") },
+      { key: "a", run: () => changeTool("direct") },
+      { key: "i", run: () => changeTool("eyedropper") },
+      { key: "h", run: () => changeTool("hand") },
       { key: "r", run: () => changeTool("rect") },
       { key: "o", run: () => changeTool("ellipse") },
       // Illustrator's letters for the same tools; free in both sets.
@@ -357,6 +366,9 @@ export function App() {
       { key: "l", run: () => changeTool("ellipse") },
       { key: "p", run: () => changeTool("pen") },
       { key: "t", run: () => changeTool("text") },
+      // Illustrator's paint keys: D for the defaults, Shift+X to swap.
+      { key: "d", run: () => run((editor) => editor.defaultPaint()) },
+      { key: "x", shift: true, run: () => run((editor) => editor.swapPaint()) },
       { key: "escape", run: escape },
       { key: "enter", run: enter },
       { key: "delete", run: () => run((editor) => editor.deleteSelection()) },
