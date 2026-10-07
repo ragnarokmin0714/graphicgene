@@ -15,6 +15,7 @@ import { Stage } from "@/Stage";
 import { StatusBar, type ViewActions } from "@/StatusBar";
 import { ToolDock } from "@/ToolDock";
 import { useEditor } from "@/useEditor";
+import { useKeymap } from "@/useKeymap";
 
 /**
  * The artboard for a brand-new document. After that the size belongs to the
@@ -74,6 +75,7 @@ export function App() {
     NEW_ARTBOARD.height,
   );
   const [notice, setNotice] = useState<string | null>(null);
+  const { keymap, setKeymap } = useKeymap();
   /** Null until known; nothing is read or written before then. */
   const [platform, setPlatform] = useState<Platform | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -345,46 +347,54 @@ export function App() {
     toggleSnapping: () => run((editor) => editor.setSnapping(!editor.snapping)),
   };
 
-  useShortcuts([
-    { key: "v", run: () => changeTool("select") },
-    { key: "r", run: () => changeTool("rect") },
-    { key: "o", run: () => changeTool("ellipse") },
-    { key: "p", run: () => changeTool("pen") },
-    { key: "t", run: () => changeTool("text") },
-    { key: "escape", run: escape },
-    { key: "enter", run: enter },
-    { key: "delete", run: () => run((editor) => editor.deleteSelection()) },
-    { key: "backspace", run: () => run((editor) => editor.deleteSelection()) },
-    { key: "a", mod: true, run: () => run((editor) => editor.selectAll()) },
-    { key: "d", mod: true, run: layerActions.duplicate },
-    // Photoshop's binding for the same thing.
-    { key: "j", mod: true, run: layerActions.duplicate },
-    { key: "g", mod: true, run: layerActions.group },
-    { key: "g", mod: true, shift: true, run: layerActions.ungroup },
-    // By position, not character: Shift turns "]" into "}" on most layouts.
-    { code: "BracketRight", mod: true, run: () => layerActions.arrange("forward") },
-    { code: "BracketLeft", mod: true, run: () => layerActions.arrange("backward") },
-    { code: "BracketRight", mod: true, shift: true, run: () => layerActions.arrange("front") },
-    { code: "BracketLeft", mod: true, shift: true, run: () => layerActions.arrange("back") },
-    { key: "h", mod: true, shift: true, run: layerActions.toggleVisible },
-    { key: "l", mod: true, shift: true, run: layerActions.toggleLocked },
-    { key: "z", mod: true, run: undo },
-    { key: "z", mod: true, shift: true, run: redo },
-    { key: "y", mod: true, run: redo },
-    { key: "s", mod: true, run: () => void save(true) },
-    // "=" is where "+" lives unshifted; the numpad's "+" needs no Shift.
-    { key: "=", mod: true, run: viewActions.zoomIn },
-    { key: "+", mod: true, run: viewActions.zoomIn },
-    { key: "+", mod: true, shift: true, run: viewActions.zoomIn },
-    { key: "-", mod: true, run: viewActions.zoomOut },
-    { key: "0", mod: true, run: viewActions.zoomTo100 },
-    { code: "Digit1", shift: true, run: viewActions.zoomToFit },
-    // Illustrator's Smart Guides toggle.
-    { key: "u", mod: true, run: viewActions.toggleSnapping },
-    { key: "o", mod: true, run: open },
-    { key: "e", mod: true, shift: true, run: exportSvg },
-    ...arrows,
-  ]);
+  useShortcuts(
+    [
+      { key: "v", run: () => changeTool("select") },
+      { key: "r", run: () => changeTool("rect") },
+      { key: "o", run: () => changeTool("ellipse") },
+      // Illustrator's letters for the same tools; free in both sets.
+      { key: "m", run: () => changeTool("rect") },
+      { key: "l", run: () => changeTool("ellipse") },
+      { key: "p", run: () => changeTool("pen") },
+      { key: "t", run: () => changeTool("text") },
+      { key: "escape", run: escape },
+      { key: "enter", run: enter },
+      { key: "delete", run: () => run((editor) => editor.deleteSelection()) },
+      { key: "backspace", run: () => run((editor) => editor.deleteSelection()) },
+      { key: "a", mod: true, run: () => run((editor) => editor.selectAll()) },
+      { key: "d", mod: true, run: layerActions.duplicate },
+      // Photoshop's binding for the same thing.
+      { key: "j", mod: true, run: layerActions.duplicate },
+      { key: "g", mod: true, run: layerActions.group },
+      { key: "g", mod: true, shift: true, run: layerActions.ungroup },
+      // By position, not character: Shift turns "]" into "}" on most layouts.
+      { code: "BracketRight", mod: true, run: () => layerActions.arrange("forward") },
+      { code: "BracketLeft", mod: true, run: () => layerActions.arrange("backward") },
+      { code: "BracketRight", mod: true, shift: true, run: () => layerActions.arrange("front") },
+      { code: "BracketLeft", mod: true, shift: true, run: () => layerActions.arrange("back") },
+      { key: "h", mod: true, shift: true, run: layerActions.toggleVisible },
+      { key: "l", mod: true, shift: true, run: layerActions.toggleLocked },
+      { key: "z", mod: true, run: undo },
+      { key: "z", mod: true, shift: true, run: redo },
+      { key: "y", mod: true, run: redo },
+      { key: "s", mod: true, run: () => void save(true) },
+      // "=" is where "+" lives unshifted; the numpad's "+" needs no Shift.
+      { key: "=", mod: true, run: viewActions.zoomIn },
+      { key: "+", mod: true, run: viewActions.zoomIn },
+      { key: "+", mod: true, shift: true, run: viewActions.zoomIn },
+      { key: "-", mod: true, run: viewActions.zoomOut },
+      { key: "0", mod: true, keymap: "default", run: viewActions.zoomTo100 },
+      { key: "0", mod: true, keymap: "illustrator", run: viewActions.zoomToFit },
+      { key: "1", mod: true, keymap: "illustrator", run: viewActions.zoomTo100 },
+      { code: "Digit1", shift: true, run: viewActions.zoomToFit },
+      // Illustrator's Smart Guides toggle.
+      { key: "u", mod: true, run: viewActions.toggleSnapping },
+      { key: "o", mod: true, run: open },
+      { key: "e", mod: true, shift: true, run: exportSvg },
+      ...arrows,
+    ],
+    keymap,
+  );
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -395,6 +405,8 @@ export function App() {
           onDownload={downloadProject}
           onExportSvg={exportSvg}
           onExportPng={exportPng}
+          keymap={keymap}
+          onKeymap={setKeymap}
         />
         <input
           ref={fileInput}
@@ -439,6 +451,7 @@ export function App() {
               onRedo={redo}
               canUndo={core?.canUndo ?? false}
               canRedo={core?.canRedo ?? false}
+              keymap={keymap}
             />
           </section>
           <PropertiesPanel properties={properties} {...propertyActions} {...arrangeActions} />
@@ -448,6 +461,7 @@ export function App() {
           artboard={artboard}
           zoom={zoom}
           viewActions={viewActions}
+          keymap={keymap}
           layerCount={layerCount}
           selectionCount={selectionCount}
           hint={hintFor(tool, mode)}

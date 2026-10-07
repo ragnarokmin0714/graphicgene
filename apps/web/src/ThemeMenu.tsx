@@ -6,8 +6,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { Keymap } from "@/shortcuts";
 import { type ThemePreference, useTheme } from "@/useTheme";
 
 const OPTIONS: { value: ThemePreference; label: string; icon: React.ReactNode }[] = [
@@ -16,14 +18,20 @@ const OPTIONS: { value: ThemePreference; label: string; icon: React.ReactNode }[
   { value: "system", label: "System", icon: <Monitor /> },
 ];
 
-export function ThemeMenu() {
+const KEYMAPS: { value: Keymap; label: string }[] = [
+  { value: "default", label: "graphicgene" },
+  { value: "illustrator", label: "Illustrator" },
+];
+
+/** Per-viewer preferences: the theme, and which set of shortcuts is in use. */
+export function ThemeMenu({ keymap, onKeymap }: { keymap: Keymap; onKeymap: (keymap: Keymap) => void }) {
   const { preference, setPreference } = useTheme();
   const current = OPTIONS.find((o) => o.value === preference) ?? OPTIONS[2];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon-sm" aria-label={`Theme: ${current.label}`}>
+        <Button size="icon-sm" aria-label={`Preferences: ${current.label} theme`}>
           {current.icon}
         </Button>
       </DropdownMenuTrigger>
@@ -36,6 +44,15 @@ export function ThemeMenu() {
           {OPTIONS.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>
               {option.icon}
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-label text-muted-foreground">Shortcuts</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={keymap} onValueChange={(value) => onKeymap(value as Keymap)}>
+          {KEYMAPS.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
               {option.label}
             </DropdownMenuRadioItem>
           ))}

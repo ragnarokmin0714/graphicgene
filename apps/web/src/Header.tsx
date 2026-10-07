@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { IconButton } from "@/IconButton";
 import { Logo } from "@/Logo";
-import { MOD, SHIFT } from "@/shortcuts";
+import { type Keymap, MOD, SHIFT } from "@/shortcuts";
 import { ThemeMenu } from "@/ThemeMenu";
 
 type Props = {
@@ -25,12 +25,14 @@ type Props = {
   onExportSvg: () => void;
   /** `scale` pixels per document unit; `transparent` leaves out the white page. */
   onExportPng: (scale: number, transparent: boolean) => void;
+  keymap: Keymap;
+  onKeymap: (keymap: Keymap) => void;
 };
 
 /** PNG scales offered, as in every design tool's export menu. */
 const PNG_SCALES = [1, 2, 3];
 
-export function Header({ desktop, onOpen, onDownload, onExportSvg, onExportPng }: Props) {
+export function Header({ desktop, onOpen, onDownload, onExportSvg, onExportPng, keymap, onKeymap }: Props) {
   // A per-viewer choice, like the theme: not part of the document.
   const [transparent, setTransparent] = useState(false);
   return (
@@ -95,7 +97,7 @@ export function Header({ desktop, onOpen, onDownload, onExportSvg, onExportPng }
           </DropdownMenuContent>
         </DropdownMenu>
         <Separator orientation="vertical" className="mx-1.5 !h-4" />
-        <ThemeMenu />
+        <ThemeMenu keymap={keymap} onKeymap={onKeymap} />
       </div>
     </header>
   );

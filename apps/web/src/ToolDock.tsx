@@ -2,7 +2,7 @@ import { Circle, MousePointer2, PenTool, Redo2, Square, Type, Undo2 } from "luci
 import { Separator } from "@/components/ui/separator";
 import type { Tool } from "@/editor";
 import { IconButton } from "@/IconButton";
-import { MOD, SHIFT } from "@/shortcuts";
+import { type Keymap, MOD, SHIFT } from "@/shortcuts";
 
 
 type Props = {
@@ -12,12 +12,14 @@ type Props = {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  /** Tooltips name the letter of the set of shortcuts in use. */
+  keymap: Keymap;
 };
 
-const TOOLS: { tool: Tool; label: string; icon: React.ReactNode; key: string }[] = [
+const TOOLS: { tool: Tool; label: string; icon: React.ReactNode; key: string; illustrator?: string }[] = [
   { tool: "select", label: "Select", icon: <MousePointer2 />, key: "V" },
-  { tool: "rect", label: "Rectangle", icon: <Square />, key: "R" },
-  { tool: "ellipse", label: "Ellipse", icon: <Circle />, key: "O" },
+  { tool: "rect", label: "Rectangle", icon: <Square />, key: "R", illustrator: "M" },
+  { tool: "ellipse", label: "Ellipse", icon: <Circle />, key: "O", illustrator: "L" },
   { tool: "pen", label: "Pen", icon: <PenTool />, key: "P" },
   { tool: "text", label: "Text", icon: <Type />, key: "T" },
 ];
@@ -33,7 +35,7 @@ export function ToolDock(props: Props) {
       aria-label="Tools"
       className="bg-card/85 shadow-float absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-xl border p-1 backdrop-blur-md"
     >
-      {TOOLS.map(({ tool, label, icon, key }) => (
+      {TOOLS.map(({ tool, label, icon, key, illustrator }) => (
         <IconButton
           key={tool}
           size="tool"
@@ -41,7 +43,7 @@ export function ToolDock(props: Props) {
           label={label}
           icon={icon}
           onClick={() => props.onToolChange(tool)}
-          shortcut={[key]}
+          shortcut={[(props.keymap === "illustrator" && illustrator) || key]}
           active={props.tool === tool}
         />
       ))}

@@ -9,7 +9,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MOD, SHIFT } from "@/shortcuts";
+import { type Keymap, MOD, SHIFT } from "@/shortcuts";
 
 /** The view: zoom, and snapping — per-viewer settings the core keeps, never saved. */
 export type ViewActions = {
@@ -27,6 +27,7 @@ type Props = {
   /** Screen pixels per document unit: 1 is 100%. */
   zoom: number;
   viewActions: ViewActions;
+  keymap: Keymap;
   layerCount: number;
   selectionCount: number;
   /** How to use the current tool or mode, when that is not obvious. */
@@ -38,6 +39,7 @@ export function StatusBar({
   artboard,
   zoom,
   viewActions,
+  keymap,
   layerCount,
   selectionCount,
   hint,
@@ -49,7 +51,7 @@ export function StatusBar({
         {artboard.width} × {artboard.height} px
       </span>
       <span aria-hidden="true" className="bg-border h-3 w-px" />
-      <ViewMenu zoom={zoom} actions={viewActions} />
+      <ViewMenu zoom={zoom} actions={viewActions} keymap={keymap} />
       <span aria-hidden="true" className="bg-border h-3 w-px" />
       <span>
         {layerCount} {layerCount === 1 ? "layer" : "layers"}
@@ -75,7 +77,8 @@ export function StatusBar({
   );
 }
 
-function ViewMenu({ zoom, actions }: { zoom: number; actions: ViewActions }) {
+function ViewMenu({ zoom, actions, keymap }: { zoom: number; actions: ViewActions; keymap: Keymap }) {
+  const illustrator = keymap === "illustrator";
   // Below 10%, a decimal keeps small zooms from all reading "0%" or "1%".
   const percent = zoom < 0.1 ? (zoom * 100).toFixed(1) : String(Math.round(zoom * 100));
   return (
@@ -100,11 +103,11 @@ function ViewMenu({ zoom, actions }: { zoom: number; actions: ViewActions }) {
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={actions.zoomTo100}>
           Zoom to 100%
-          <DropdownMenuShortcut>{MOD} 0</DropdownMenuShortcut>
+          <DropdownMenuShortcut>{MOD} {illustrator ? "1" : "0"}</DropdownMenuShortcut>
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={actions.zoomToFit}>
           Zoom to fit
-          <DropdownMenuShortcut>{SHIFT} 1</DropdownMenuShortcut>
+          <DropdownMenuShortcut>{illustrator ? `${MOD} 0` : `${SHIFT} 1`}</DropdownMenuShortcut>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* Hold Ctrl (⌘) during a drag to skip snapping just that once. */}

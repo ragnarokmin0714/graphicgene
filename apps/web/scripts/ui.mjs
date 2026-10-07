@@ -1014,6 +1014,41 @@ try {
   check(rowNames(1) === "Hi 中文", `and the name follows the text (${rowNames(1)})`);
   await checkScreen("after editing text");
 
+  section("Shortcuts");
+  await key("Escape");
+  // Zhuyin turns R into ㄐ, and an input method mid-composition reports
+  // "Process": the key's place on the keyboard still picks the tool.
+  await key("ㄐ", { code: "KeyR" });
+  check(pressed("Rectangle") === "true", "with Zhuyin on, the R key still takes the rectangle");
+  await key("Process", { code: "KeyV" });
+  check(pressed("Select") === "true", "and V, mid-composition, the select tool");
+  await key("l");
+  check(pressed("Ellipse") === "true", "L takes the ellipse, as in Illustrator");
+  await key("m");
+  check(pressed("Rectangle") === "true", "M the rectangle");
+  await key("v");
+
+  const pickKeymap = async (label) => {
+    const trigger = document.querySelector('header button[aria-label^="Preferences"]');
+    await fire(trigger, new window.PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 5 }));
+    await press([...document.querySelectorAll('[role="menuitemradio"]')].find((item) => item.textContent === label));
+  };
+  const zoomed = () => document.querySelector('button[aria-label^="Zoom "]').textContent;
+  await key("0", { ctrlKey: true });
+  await key("1", { ctrlKey: true });
+  check(zoomed() === "100%", "Ctrl+1 does nothing in graphicgene's own shortcuts");
+  await pickKeymap("Illustrator");
+  check(localStorage.getItem("graphicgene:keymap") === "illustrator", "Illustrator's shortcuts are picked and kept");
+  await key("0", { ctrlKey: true });
+  check(view()[0] > 1, `then Ctrl+0 fits the artboard (${zoomed()})`);
+  await key("1", { ctrlKey: true });
+  check(zoomed() === "100%", "and Ctrl+1 is 100%");
+  await pickKeymap("graphicgene");
+  check(localStorage.getItem("graphicgene:keymap") === null, "back to graphicgene's, nothing stored");
+  await key("!", { code: "Digit1", shiftKey: true });
+  await key("0", { ctrlKey: true });
+  check(zoomed() === "100%", "where Ctrl+0 is 100% again");
+
   section("Files");
   // Radix opens a menu on pointerdown, not on click.
   const exportAs = async (label) => {
